@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Button,
@@ -6,6 +6,7 @@ import {
   Col,
   Divider,
   Row,
+  Select,
   Space,
   Spin,
   Statistic,
@@ -25,6 +26,7 @@ import QuarterlyTransactionsSection from "./QuarterlyTransactionsSection";
 import { usePnlColor } from "../../hooks/usePnlColor";
 import { buildSnapshotComposition, convertSnapshotValue, parseSnapshotExchangeRates } from "./aggregateSnapshotHoldings";
 import { formatQuarterlyMoney } from "./formatMoney";
+import type { Market } from "../../types";
 
 const { Title, Text } = Typography;
 
@@ -46,8 +48,12 @@ export default function SnapshotDetail() {
 
   const { pnlColorDark } = usePnlColor();
   const baseCurrency = useExchangeRateStore((state) => state.baseCurrency);
+  const [holdingsMarket, setHoldingsMarket] = useState<Market>();
 
   const holdings = detail?.holdings ?? [];
+  const filteredHoldings = holdingsMarket
+    ? holdings.filter((holding) => holding.market === holdingsMarket)
+    : holdings;
 
   const { fetchAccounts } = useAccountStore();
 
@@ -273,9 +279,29 @@ export default function SnapshotDetail() {
 
       {/* Holdings Table */}
       {snapshotId && (
-        <Card size="small" title="持仓明细">
+        <Card
+          size="small"
+          title="持仓明细"
+          extra={(
+            <Select<Market>
+              aria-label="筛选持仓市场"
+              size="small"
+              allowClear
+              placeholder="全部市场"
+              style={{ width: 140 }}
+              value={holdingsMarket}
+              onChange={setHoldingsMarket}
+              options={[
+                { label: "🇺🇸 美股", value: "US" },
+                { label: "🇨🇳 A股", value: "CN" },
+                { label: "🇭🇰 港股", value: "HK" },
+              ]}
+            />
+          )}
+        >
           <SnapshotHoldingsTable
-            holdings={detail?.holdings ?? []}
+            key={`${snapshotId}-${holdingsMarket ?? "all"}`}
+            holdings={filteredHoldings}
             snapshotId={snapshotId}
             loading={loading}
             snap={snap}

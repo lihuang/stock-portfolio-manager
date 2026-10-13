@@ -8,7 +8,7 @@ import { useTablePageSize } from "../../hooks/tablePageSize";
 import { formatHoldingShares } from "../../lib/formatMoney";
 import HoldingNotesEditor from "./HoldingNotesEditor";
 import { formatQuarterlyMoney } from "./formatMoney";
-import { aggregateSnapshotHoldings, parseSnapshotExchangeRates, snapshotHoldingCurrency, type AggregatedSnapshotHolding } from "./aggregateSnapshotHoldings";
+import { aggregateSnapshotHoldings, convertSnapshotValue, parseSnapshotExchangeRates, snapshotHoldingCurrency, type AggregatedSnapshotHolding } from "./aggregateSnapshotHoldings";
 import { isHoldingEditorTargetCurrent } from "./holdingHistory";
 
 const { Text } = Typography;
@@ -35,6 +35,9 @@ export default function SnapshotHoldingsTable({ holdings, snapshotId, loading, s
   const snapshotRates = useMemo(() => parseSnapshotExchangeRates(snap?.exchange_rates), [snap?.exchange_rates]);
   const rows = useMemo(() => aggregateSnapshotHoldings(holdings, snapshotRates, baseCurrency), [holdings, snapshotRates, baseCurrency]);
   const totalValue = useMemo(() => rows.some((row) => row.market_value_base === null) ? null : rows.reduce((sum, row) => sum + (row.market_value_base ?? 0), 0), [rows]);
+  const formatWeight = (marketValue: number | null) => totalValue !== null && totalValue > 0 && marketValue !== null
+    ? `${(marketValue / totalValue * 100).toFixed(2)}%`
+    : "—";
 
   const stockColumns: ColumnsType<AggregatedSnapshotHolding> = [
     { title: "代码", dataIndex: "symbol", key: "symbol", fixed: "left", width: 110, sorter: (a, b) => a.symbol.localeCompare(b.symbol), render: (v: string) => <Text strong>{v}</Text> },
@@ -44,7 +47,7 @@ export default function SnapshotHoldingsTable({ holdings, snapshotId, loading, s
     { title: "均价", dataIndex: "avg_cost", key: "avg_cost", width: 110, align: "right", render: (v: number, row) => formatQuarterlyMoney(v, snapshotHoldingCurrency(row), 3) },
     { title: "收盘价", dataIndex: "close_price", key: "close_price", width: 100, align: "right", render: (v: number, row) => formatQuarterlyMoney(v, snapshotHoldingCurrency(row)) },
     { title: "市值", dataIndex: "market_value", key: "market_value", width: 140, align: "right", defaultSortOrder: "descend", sorter: (a, b) => (a.market_value_base ?? 0) - (b.market_value_base ?? 0), render: (v: number, row) => formatQuarterlyMoney(v, snapshotHoldingCurrency(row)) },
-    { title: "仓位%", key: "weight", width: 80, align: "right", sorter: (a, b) => (a.market_value_base ?? 0) - (b.market_value_base ?? 0), render: (_, row) => totalValue !== null && totalValue > 0 && row.market_value_base !== null ? `${(row.market_value_base / totalValue * 100).toFixed(2)}%` : "—" },
+    { title: "仓位%", key: "weight", width: 80, align: "right", sorter: (a, b) => (a.market_value_base ?? 0) - (b.market_value_base ?? 0), render: (_, row) => formatWeight(row.market_value_base) },
     { title: "盈亏金额", dataIndex: "pnl", key: "pnl", width: 150, align: "right", sorter: (a, b) => a.pnl - b.pnl, render: (v: number, row) => <Text style={{ color: pnlColorDark(v) }}>{v >= 0 ? "+" : "-"}{formatQuarterlyMoney(Math.abs(v), snapshotHoldingCurrency(row))}</Text> },
     { title: "盈亏比例", dataIndex: "pnl_percent", key: "pnl_percent", width: 90, align: "right", render: (v: number | null) => <Text style={{ color: v == null ? undefined : pnlColorDark(v) }}>{fmtPct(v)}</Text> },
   ];
@@ -53,7 +56,7 @@ export default function SnapshotHoldingsTable({ holdings, snapshotId, loading, s
     { title: "账户", dataIndex: "account_name", key: "account_name", width: 160 },
     { title: "持仓数量", dataIndex: "shares", key: "shares", width: 90, align: "right", render: (v: number, row) => formatHoldingShares(v, row.symbol) },
     { title: "市值", dataIndex: "market_value", key: "market_value", width: 140, align: "right", render: (v: number, row) => formatQuarterlyMoney(v, snapshotHoldingCurrency(row)) },
-    { title: "仓位", dataIndex: "weight", key: "weight", width: 70, align: "right", render: (v: number) => `${v.toFixed(2)}%` },
+    { title: "仓位", key: "weight", width: 70, align: "right", render: (_, row) => formatWeight(convertSnapshotValue(row.market_value, snapshotHoldingCurrency(row), baseCurrency, snapshotRates)) },
     { title: "均价", dataIndex: "avg_cost", key: "avg_cost", width: 90, align: "right", render: (v: number, row) => formatQuarterlyMoney(v, snapshotHoldingCurrency(row), 3) },
     { title: "盈亏金额", dataIndex: "pnl", key: "pnl", width: 150, align: "right", render: (v: number, row) => <Text style={{ color: pnlColorDark(v) }}>{v >= 0 ? "+" : "-"}{formatQuarterlyMoney(Math.abs(v), snapshotHoldingCurrency(row))}</Text> },
     { title: "盈亏比例", dataIndex: "pnl_percent", key: "pnl_percent", width: 90, align: "right", render: (v: number | null) => <Text style={{ color: v == null ? undefined : pnlColorDark(v) }}>{fmtPct(v)}</Text> },
