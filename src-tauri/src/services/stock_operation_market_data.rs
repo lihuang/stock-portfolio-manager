@@ -17,6 +17,7 @@ pub(crate) fn upsert_stock_closes(
     source: &str,
     prices: &[(NaiveDate, f64)],
 ) -> Result<(), String> {
+    let symbol = crate::symbols::normalize_cn_stock_symbol(symbol, market);
     let mut conn = db.conn.lock().map_err(|error| error.to_string())?;
     let transaction = conn.transaction().map_err(|error| error.to_string())?;
     let updated_at = Utc::now().to_rfc3339();
@@ -62,6 +63,7 @@ pub(crate) fn load_stock_price_series(
     start: NaiveDate,
     end: NaiveDate,
 ) -> Result<Vec<DailyMarketPoint>, String> {
+    let symbol = crate::symbols::normalize_cn_stock_symbol(symbol, market);
     let conn = db.conn.lock().map_err(|error| error.to_string())?;
     let mut statement = conn
         .prepare(
@@ -114,6 +116,71 @@ mod tests {
 
     fn date(value: &str) -> NaiveDate {
         NaiveDate::parse_from_str(value, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn mainland_close_cache_uses_one_lowercase_row_for_either_caller_case() {
+        let db = Database::new(":memory:").unwrap();
+        let day = date("2026-10-12");
+        for (uppercase, lowercase) in [
+            ("SH600519", "sh600519"),
+            ("SZ000858", "sz000858"),
+            ("BJ430047", "bj430047"),
+        ] {
+            upsert_stock_closes(&db, uppercase, "CN", "test", &[(day, 20.0)]).unwrap();
+            upsert_stock_closes(&db, lowercase, "CN", "test", &[(day, 24.0)]).unwrap();
+            let rows: Vec<(String, f64)> = db.conn.lock().unwrap()
+                .prepare("SELECT symbol, close FROM stock_daily_prices WHERE market = 'CN' AND LOWER(symbol) = ?1")
+                .unwrap()
+                .query_map([lowercase], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert_eq!(rows, vec![(lowercase.to_string(), 24.0)]);
+            for caller in [uppercase, lowercase] {
+                let points = load_stock_price_series(&db, caller, "CN", day, day).unwrap();
+                assert_eq!(
+                    points,
+                    vec![super::DailyMarketPoint {
+                        date: day,
+                        close: 24.0
+                    }]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn close_cache_preserves_symbols_outside_mainland_prefixed_codes() {
+        let db = Database::new(":memory:").unwrap();
+        let day = date("2026-10-12");
+        for (symbol, market) in [
+            ("AAPL", "US"),
+            ("700.HK", "HK"),
+            ("$CASH-CNY", "CN"),
+            ("000300.SS", "CN"),
+            ("600519", "CN"),
+            ("SH600519", "US"),
+        ] {
+            upsert_stock_closes(&db, symbol, market, "test", &[(day, 20.0)]).unwrap();
+            let stored: String = db
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT symbol FROM stock_daily_prices WHERE symbol = ?1 AND market = ?2",
+                    [symbol, market],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(stored, symbol);
+            assert_eq!(
+                load_stock_price_series(&db, symbol, market, day, day)
+                    .unwrap()
+                    .len(),
+                1
+            );
+        }
     }
 
     #[test]

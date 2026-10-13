@@ -12,6 +12,7 @@ pub fn create_alert(
     alert_type: String,
     threshold: f64,
 ) -> Result<PriceAlert, String> {
+    let symbol = crate::symbols::normalize_cn_stock_symbol(&symbol, &market);
     let conn = db.conn.lock().unwrap();
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
@@ -362,5 +363,42 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM alert_history", [], |row| row.get(0))
             .unwrap();
         assert_eq!(history_count, 0);
+    }
+
+    #[test]
+    fn new_alerts_store_only_mainland_prefixed_symbols_in_lowercase() {
+        let db = Database::new(":memory:").unwrap();
+        for (symbol, market, expected) in [
+            ("SH600519", "CN", "sh600519"),
+            ("SZ000858", "CN", "sz000858"),
+            ("BJ430047", "CN", "bj430047"),
+            ("aapl", "US", "aapl"),
+            ("700.HK", "HK", "700.HK"),
+            ("$CASH-CNY", "CN", "$CASH-CNY"),
+            ("SH600519", "US", "SH600519"),
+        ] {
+            let alert = create_alert(
+                &db,
+                None,
+                symbol.into(),
+                "test".into(),
+                market.into(),
+                "PRICE_ABOVE".into(),
+                100.0,
+            )
+            .unwrap();
+            assert_eq!(alert.symbol, expected);
+            let stored: String = db
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT symbol FROM price_alerts WHERE id = ?1",
+                    [alert.id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(stored, expected);
+        }
     }
 }

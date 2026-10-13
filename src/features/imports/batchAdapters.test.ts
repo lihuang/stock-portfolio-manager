@@ -15,6 +15,22 @@ test('preview preserves original metadata and edited normalized values for selec
 test('holding payload preserves supplied market currency category and cost', () => {
  assert.deepEqual(holdingBatchData({accountId:'a',symbol:'HKD',name:'Cash',market:'HK',currency:'HKD',shares:20,avgCost:1,categoryId:'cash'}),{symbol:'HKD',name:'Cash',market:'HK',currency:'HKD',shares:20,avg_cost:1,category_id:'cash'});
 });
+
+test('edited mainland codes are canonical in transaction and holding preview payloads', () => {
+ for (const [input, expected] of [['SH600036', 'sh600036'], ['Sz000001', 'sz000001'], ['BJ920001', 'bj920001'], ['AAPL', 'AAPL'], ['700.HK', '700.HK'], ['$CASH-CNY', '$CASH-CNY'], ['600036', '600036']]) {
+  assert.equal(transactionBatchData({symbol:input,traded_at:'2026-01-01T00:00:00Z'},'CN').symbol,expected);
+  assert.equal(holdingBatchData({symbol:input,market:'CN',name:'Name'}).symbol,expected);
+ }
+});
+
+test('US and HK preview payloads preserve mainland-shaped symbols', () => {
+ for (const market of ['US', 'HK']) {
+  for (const symbol of ['SH600036', 'Sz000001', 'BJ920001', 'AAPL', '700.HK']) {
+   assert.equal(transactionBatchData({symbol,traded_at:'2026-01-01T00:00:00Z'},market).symbol,symbol);
+   assert.equal(holdingBatchData({symbol,market,name:'Name'}).symbol,symbol);
+  }
+ }
+});
 test('THS retains raw rows and distinct execution ids even for equal trades', () => {
  const header='成交日期,证券代码,证券名称,操作,成交价格,成交数量,成交金额,成交编号';
  const a='20260101,600000,浦发银行,买入,10,100,1000,001';

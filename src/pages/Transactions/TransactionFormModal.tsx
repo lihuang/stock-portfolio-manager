@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useAccountStore } from "../../stores/accountStore";
 import { useTransactionStore } from "../../stores/transactionStore";
 import { useQuoteStore } from "../../stores/quoteStore";
+import { normalizeMainlandSymbolCase } from "../../lib/symbol.ts";
 import type { Currency, Holding, Market, QuoteCommandResult, StockQuote, Transaction, TransactionType } from "../../types";
 
 interface Props {
@@ -239,7 +240,10 @@ export default function TransactionFormModal({
         shares: 0,
         price: 0,
         commission: 0,
-      } : { transactionType: stockSubmitted.transactionType as TransactionType }),
+      } : {
+        symbol: values.market === "CN" ? normalizeMainlandSymbolCase(stockSubmitted.symbol) : stockSubmitted.symbol,
+        transactionType: stockSubmitted.transactionType as TransactionType,
+      }),
       tradedAt: values.tradedAt.toISOString(),
     };
     const generation = session.current;
@@ -300,6 +304,7 @@ export default function TransactionFormModal({
           <Row gutter={12}>
             <Col span={12}>
               <Form.Item name="symbol" label="股票代码" style={{ marginBottom: 12 }}
+                normalize={(value: string) => selectedFormMarket === "CN" ? normalizeMainlandSymbolCase(value) : value}
                 rules={[{ required: true, message: "请输入股票代码" }]}>
                 <AutoComplete
                   options={symbolOptions}

@@ -1,4 +1,5 @@
 mod alert_history_schema;
+mod cn_symbol_schema;
 pub(crate) mod migrations;
 mod quarterly_schema;
 mod schema;
@@ -25,6 +26,8 @@ impl Database {
     }
 }
 
+#[cfg(test)]
+mod cn_symbol_tests;
 #[cfg(test)]
 mod quarterly_schema_tests;
 #[cfg(test)]

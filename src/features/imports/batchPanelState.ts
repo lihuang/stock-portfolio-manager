@@ -1,4 +1,5 @@
 import type { ImportBatch } from "./batchTypes";
+import { normalizeMainlandSymbolCase } from "../../lib/symbol.ts";
 
 type Row = ImportBatch["rows"][number];
 export const selectableBatchRow = (row: Row) => ["ready", "suspected", "failed"].includes(row.status);
@@ -15,12 +16,19 @@ export function selectionAfterBatchResponse(batch: ImportBatch, selected: readon
   const safeSelection = selected.filter((key) => !batch.rows.some((row) => row.key === key && row.status === "suspected"));
   return batchApplyArgs(batch, safeSelection).rowKeys;
 }
+export function normalizeReconciliationSymbol(batch: ImportBatch, symbol: string): string {
+  const key = symbol.trim().toUpperCase();
+  const knownOtherMarket = batch.rows.some((row) =>
+    typeof row.data?.symbol === "string" && row.data.symbol.trim().toUpperCase() === key &&
+    (row.data.market === "US" || row.data.market === "HK"));
+  return knownOtherMarket ? symbol : normalizeMainlandSymbolCase(symbol);
+}
 export function batchReconciliationArgs(batch: ImportBatch, balances: Record<string, number | null>) {
   return {
     batchId: batch.id,
     balances: Object.entries(balances)
       .filter(([, expected]) => expected != null)
-      .map(([symbol, expected_shares]) => ({symbol, expected_shares})),
+      .map(([symbol, expected_shares]) => ({symbol: normalizeReconciliationSymbol(batch, symbol), expected_shares})),
   };
 }
 
@@ -36,10 +44,10 @@ export function addExpectedBalance(
   inputSymbol: string,
   expected: number | null,
 ): Record<string, number | null> {
-  const symbol = inputSymbol.trim().toUpperCase();
+  const symbol = normalizeReconciliationSymbol(batch, inputSymbol.trim().toUpperCase());
   if (!symbol) throw new Error("请输入证券代码或现金代码");
   const existing = [...batch.reconciliation.map((row) => row.symbol), ...Object.keys(balances)];
-  if (existing.some((value) => value.trim().toUpperCase() === symbol)) {
+  if (existing.some((value) => value.trim().toUpperCase() === symbol.toUpperCase())) {
     throw new Error("此证券已存在，请直接编辑表格中的券商余额");
   }
   if (expected == null || !Number.isFinite(expected)) throw new Error("请输入有效数量或现金余额");

@@ -1,7 +1,7 @@
 use super::schema;
 use rusqlite::{Connection, Error, OptionalExtension, Result};
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 10;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 11;
 
 pub(crate) fn run_migrations(conn: &mut Connection) -> Result<()> {
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
@@ -50,6 +50,9 @@ pub(crate) fn run_migrations(conn: &mut Connection) -> Result<()> {
     }
     if version < 10 {
         super::alert_history_schema::migrate_v10(&transaction)?;
+    }
+    if version < 11 {
+        super::cn_symbol_schema::migrate_v11(&transaction)?;
     }
     transaction.pragma_update(None, "user_version", CURRENT_SCHEMA_VERSION)?;
     transaction.commit()

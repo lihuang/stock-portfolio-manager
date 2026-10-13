@@ -41,6 +41,155 @@ fn shares(db: &Database, symbol: &str) -> f64 {
 }
 
 #[test]
+fn cn_import_normalizes_mainland_prefixes_without_changing_other_markets() {
+    for (market, symbol, expected) in [
+        ("CN", " SH600036 ", "sh600036"),
+        ("CN", "sZ000001", "sz000001"),
+        ("CN", "BJ920001", "bj920001"),
+        ("CN", "$CASH-CNY", "$CASH-CNY"),
+        ("US", "aapl", "AAPL"),
+        ("US", "BRK B", "BRK-B"),
+        ("HK", "700.hk", "700.HK"),
+        ("US", "SH600036", "SH600036"),
+    ] {
+        let mut data = buy("one", 10.0)["data"].clone();
+        data["market"] = json!(market);
+        data["symbol"] = json!(symbol);
+        let normalized = dedup::normalize("transactions", "a", &data).unwrap();
+        assert_eq!(normalized["symbol"], expected, "{market}: {symbol}");
+    }
+}
+
+#[test]
+fn cn_reconciliation_uses_account_market_for_broker_only_balances() {
+    let empty = AccountState {
+        holdings: vec![],
+        transactions: vec![],
+    };
+    for (market, expected_symbol) in [("CN", "sh600036"), ("US", "SH600036"), ("HK", "SH600036")] {
+        let rows = state::reconciliation(
+            &empty,
+            &empty,
+            &[ExpectedBalance {
+                symbol: "SH600036".into(),
+                expected_shares: 10.0,
+            }],
+            market,
+        );
+        assert_eq!(rows[0].symbol, expected_symbol);
+        assert_eq!(rows[0].difference, Some(-10.0));
+    }
+}
+
+#[test]
+fn cn_legacy_batch_remains_undoable_after_symbol_migration_without_rewriting_audit() {
+    let db = database();
+    db.conn.lock().unwrap().execute_batch(
+        "INSERT INTO holdings (id,account_id,symbol,name,market,shares,avg_cost,currency,created_at,updated_at)
+         VALUES ('cn','a','SH600036','招商银行','CN',100,10,'CNY','2025-01-01','2025-01-01');
+         INSERT INTO transactions (id,holding_id,account_id,symbol,name,market,transaction_type,shares,price,total_amount,currency,traded_at,created_at)
+         VALUES ('open','cn','a','SH600036','招商银行','CN','OPEN',100,10,1000,'CNY','2025-01-01','2025-01-01');"
+    ).unwrap();
+    let mut row = buy("one", 20.0);
+    row["raw"] = json!("SH600036,BUY,20");
+    row["external_id"] = json!("cn-execution");
+    row["data"]["symbol"] = json!("SH600036");
+    row["data"]["market"] = json!("CN");
+    row["data"]["currency"] = json!("CNY");
+    let req = request("cn-original", vec![row]);
+    let batch = preview_import_batch(&db, &req).unwrap();
+    let batch = apply_all(&db, &batch);
+    // Reproduce old persisted audit independently of the current write boundary.
+    {
+        let conn = db.conn.lock().unwrap();
+        let (before, after): (String, String) = conn
+            .query_row(
+                "SELECT before_state,after_state FROM import_batches WHERE id=?1",
+                [&batch.id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        let legacy = |encoded: &str| {
+            let mut value: serde_json::Value = serde_json::from_str(encoded).unwrap();
+            for table in ["holdings", "transactions"] {
+                for row in value[table].as_array_mut().unwrap() {
+                    if row["market"] == "CN"
+                        && row["symbol"]
+                            .as_str()
+                            .unwrap()
+                            .eq_ignore_ascii_case("sh600036")
+                    {
+                        row["symbol"] = json!("SH600036");
+                    }
+                }
+            }
+            value.to_string()
+        };
+        conn.execute(
+            "UPDATE import_batches SET before_state=?2,after_state=?3 WHERE id=?1",
+            params![batch.id, legacy(&before), legacy(&after)],
+        )
+        .unwrap();
+        conn.execute("UPDATE import_batch_rows SET data=json_set(data,'$.symbol','SH600036'),fingerprint='legacy-uppercase-fingerprint' WHERE batch_id=?1", [&batch.id]).unwrap();
+        conn.execute_batch(
+            "UPDATE holdings SET symbol=LOWER(symbol) WHERE market='CN' AND symbol='SH600036';
+            UPDATE transactions SET symbol=LOWER(symbol) WHERE market='CN' AND symbol='SH600036';",
+        )
+        .unwrap();
+    }
+    let audit = || {
+        let conn = db.conn.lock().unwrap();
+        conn.query_row("SELECT b.before_state,b.after_state,b.request_json,r.raw,r.data,r.fingerprint FROM import_batches b JOIN import_batch_rows r ON r.batch_id=b.id WHERE b.id=?1", [&batch.id], |r| {
+            (0..6).map(|index| r.get::<_, String>(index)).collect::<rusqlite::Result<Vec<_>>>()
+        }).unwrap()
+    };
+    let original_audit = audit();
+    let read = get_import_batch(&db, &batch.id).unwrap();
+    assert!(read.can_undo, "{:?}", read.conflict);
+    assert_eq!(read.rows[0].data["symbol"], "sh600036");
+    assert_eq!(read.rows[0].raw, "SH600036,BUY,20");
+    let mut reimport = req.clone();
+    reimport.request_id = "cn-reimport".into();
+    reimport.rows[0].data["symbol"] = json!("sh600036");
+    assert_eq!(
+        preview_import_batch(&db, &reimport).unwrap().rows[0].status,
+        "duplicate"
+    );
+    let reconciled = reconcile_import_batch(
+        &db,
+        &batch.id,
+        &[ExpectedBalance {
+            symbol: "SH600036".into(),
+            expected_shares: 120.0,
+        }],
+    )
+    .unwrap();
+    let stock_rows: Vec<_> = reconciled
+        .reconciliation
+        .iter()
+        .filter(|r| !r.symbol.starts_with("$CASH-"))
+        .collect();
+    assert_eq!(stock_rows.len(), 1);
+    assert_eq!(stock_rows[0].symbol, "sh600036");
+    assert_eq!(stock_rows[0].before_shares, 100.0);
+    assert_eq!(stock_rows[0].after_shares, 120.0);
+    assert_eq!(stock_rows[0].difference, Some(0.0));
+    assert_eq!(audit(), original_audit);
+    undo_import_batch(&db, &batch.id).unwrap();
+    assert_eq!(shares(&db, "sh600036"), 100.0);
+    let restored: String = db
+        .conn
+        .lock()
+        .unwrap()
+        .query_row("SELECT symbol FROM transactions WHERE id='open'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(restored, "sh600036");
+    assert_eq!(audit(), original_audit);
+}
+
+#[test]
 fn share_class_import_normalizes_only_us_stock_aliases() {
     for (market, symbol, expected) in [
         ("US", "BRK B", "BRK-B"),

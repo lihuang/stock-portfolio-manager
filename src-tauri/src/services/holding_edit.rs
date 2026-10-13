@@ -23,6 +23,10 @@ pub fn update_holding(
     id: String,
     input: CreateHoldingInput,
 ) -> Result<Holding, String> {
+    let input = CreateHoldingInput {
+        symbol: crate::symbols::normalize_cn_stock_symbol(&input.symbol, &input.market),
+        ..input
+    };
     let mut conn = db.conn.lock().map_err(|error| error.to_string())?;
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)

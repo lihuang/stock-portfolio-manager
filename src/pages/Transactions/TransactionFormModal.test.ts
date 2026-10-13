@@ -6,19 +6,19 @@ import { fileURLToPath } from "node:url";
 
 const projectRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
-function submitTransaction(saveFails = false, refreshFails = false, notes = "感觉低估aaaab") {
+function submitTransaction(saveFails = false, refreshFails = false, notes = "感觉低估aaaab", symbol = "TEST", transactionType = "BUY", market = "US") {
   const probe = String.raw`
     const React = await import("react");
     const { renderToStaticMarkup } = await import("react-dom/server");
     const antd = await import("antd");
     const { mock } = await import("bun:test");
     const dayjs = (await import("dayjs")).default;
-    let onFinish;
+    let onFinish, symbolField;
     const passthrough = ({ children }) => children;
     const Form = ({ children, onFinish: submit }) => { onFinish = submit; return children; };
-    Form.Item = passthrough;
+    Form.Item = (props) => { if (props.name === "symbol") symbolField = props; return props.children; };
     Form.useForm = () => [{ resetFields() {}, setFieldsValue() {}, getFieldValue() {}, submit() {} }];
-    Form.useWatch = (name) => ({ transactionType: "BUY", market: "US" })[name];
+    Form.useWatch = (name) => ({ transactionType: "BUY", market: ${JSON.stringify(market)} })[name];
     const errors = [];
     const warnings = [];
     mock.module("antd", () => ({ ...antd, Modal: passthrough, Form, message: { success() {}, error: (text) => errors.push(text), warning: (text) => warnings.push(text) } }));
@@ -54,16 +54,16 @@ function submitTransaction(saveFails = false, refreshFails = false, notes = "感
         if (${refreshFails}) throw new Error("测试：刷新失败");
       },
     }));
-    const submitting = onFinish({ accountId: original.account_id, symbol: original.symbol, name: original.name, market: "US", transactionType: "BUY", shares: 2, price: 100, totalAmount: 200, commission: 0, currency: "USD", tradedAt: dayjs(original.traded_at), notes: ${JSON.stringify(notes)} });
+    const submitting = onFinish({ accountId: original.account_id, symbol: ${symbol === null ? "undefined" : JSON.stringify(symbol)}, name: original.name, market: ${JSON.stringify(market)}, transactionType: ${JSON.stringify(transactionType)}, shares: 2, price: 100, totalAmount: 200, commission: 0, currency: "USD", tradedAt: dayjs(original.traded_at), notes: ${JSON.stringify(notes)} });
     if (${saveFails}) {
       await submitting;
       process.stdout.write(JSON.stringify({ closes, refreshedTransaction, errors, warnings, commands, submittedPayloads, transaction: useTransactionStore.getState().transactions[0] }));
     } else {
-      await refreshStarted;
+      await Promise.race([refreshStarted, submitting]);
       const closesBeforeRefresh = closes;
       finishRefresh();
       await submitting;
-      process.stdout.write(JSON.stringify({ closesBeforeRefresh, closes, refreshedTransaction, errors, warnings, commands, submittedPayloads, transaction: useTransactionStore.getState().transactions[0] }));
+      process.stdout.write(JSON.stringify({ fieldSymbol: ${symbol === null ? "null" : `symbolField.normalize?.(${JSON.stringify(symbol)}) ?? ${JSON.stringify(symbol)}`}, closesBeforeRefresh, closes, refreshedTransaction, errors, warnings, commands, submittedPayloads, transaction: useTransactionStore.getState().transactions[0] }));
     }
   `;
   return JSON.parse(execFileSync("bun", ["--eval", probe], { cwd: projectRoot, encoding: "utf8" }));
@@ -118,4 +118,26 @@ test("clearing a transaction note submits an empty string and refreshes the clea
   assert.equal(result.closes, 1);
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.warnings, []);
+});
+
+test("transaction submission canonicalizes only recognized mainland prefixes", () => {
+  for (const [input, expected] of [["SH600036", "sh600036"], ["Sz000001", "sz000001"], ["BJ920001", "bj920001"], ["AAPL", "AAPL"], ["700.HK", "700.HK"], ["$CASH-CNY", "$CASH-CNY"], ["600036", "600036"]]) {
+    assert.equal(submitTransaction(false, false, "", input, "BUY", "CN").submittedPayloads[0].symbol, expected);
+  }
+});
+
+test("the transaction symbol field canonicalizes mainland prefixes during entry", () => {
+  assert.equal(submitTransaction(false, false, "", "SH600036", "BUY", "CN").fieldSymbol, "sh600036");
+});
+
+test("US and HK transaction entry and submission preserve mainland-shaped symbols", () => {
+  for (const [market, symbol] of [["US", "SH600036"], ["US", "Sz000001"], ["US", "BJ920001"], ["US", "AAPL"], ["HK", "SH600036"], ["HK", "Sz000001"], ["HK", "BJ920001"], ["HK", "700.HK"]]) {
+    const result = submitTransaction(false, false, "", symbol, "BUY", market);
+    assert.equal(result.fieldSymbol, symbol);
+    assert.equal(result.submittedPayloads[0].symbol, symbol);
+  }
+});
+
+test("cash transaction submission generates its cash symbol without a stock field", () => {
+  assert.equal(submitTransaction(false, false, "", null, "CASH_IN").submittedPayloads[0].symbol, "$CASH-USD");
 });

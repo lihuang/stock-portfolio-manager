@@ -941,6 +941,83 @@ fn sample_quote(symbol: &str, market: &str) -> StockQuote {
 }
 
 #[test]
+fn mainland_quote_persistence_merges_case_aliases_and_restores_uppercase_lookups() {
+    let db = crate::db::Database::new(":memory:").unwrap();
+    for (uppercase, lowercase) in [
+        ("SH600519", "sh600519"),
+        ("SZ000858", "sz000858"),
+        ("BJ430047", "bj430047"),
+    ] {
+        save_quotes_to_db(&db, &[sample_quote(uppercase, "CN")]).unwrap();
+        let mut refreshed = sample_quote(lowercase, "CN");
+        refreshed.current_price = 120.0;
+        save_quotes_to_db(&db, &[refreshed]).unwrap();
+        let rows: Vec<(String, f64)> = db.conn.lock().unwrap()
+            .prepare("SELECT symbol, current_price FROM cached_quotes WHERE market = 'CN' AND LOWER(symbol) = ?1")
+            .unwrap()
+            .query_map([lowercase], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(rows, vec![(lowercase.to_string(), 120.0)]);
+    }
+    let restored = QuoteCache::new();
+    restored.set_batch(&load_quotes_from_db(&db).unwrap());
+    for (uppercase, lowercase) in [
+        ("SH600519", "sh600519"),
+        ("SZ000858", "sz000858"),
+        ("BJ430047", "bj430047"),
+    ] {
+        let quote = restored.get("CN", uppercase).unwrap();
+        assert_eq!(quote.symbol, lowercase);
+        assert_eq!(quote.current_price, 120.0);
+    }
+}
+
+#[test]
+fn quote_persistence_preserves_symbols_outside_mainland_prefixed_codes() {
+    let db = crate::db::Database::new(":memory:").unwrap();
+    for (symbol, market) in [
+        ("aapl", "US"),
+        ("700.HK", "HK"),
+        ("$CASH-CNY", "CN"),
+        ("000300.SS", "CN"),
+        ("600519", "CN"),
+        ("SH600519", "US"),
+    ] {
+        save_quotes_to_db(&db, &[sample_quote(symbol, market)]).unwrap();
+    }
+    let quotes = load_quotes_from_db(&db).unwrap();
+    for (symbol, market) in [
+        ("aapl", "US"),
+        ("700.HK", "HK"),
+        ("$CASH-CNY", "CN"),
+        ("000300.SS", "CN"),
+        ("600519", "CN"),
+        ("SH600519", "US"),
+    ] {
+        assert!(quotes
+            .iter()
+            .any(|quote| quote.symbol == symbol && quote.market == market));
+    }
+}
+
+#[test]
+fn quote_persistence_loads_legacy_uppercase_mainland_symbols_in_canonical_case() {
+    let db = crate::db::Database::new(":memory:").unwrap();
+    save_quotes_to_db(&db, &[sample_quote("sh600519", "CN")]).unwrap();
+    db.conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE cached_quotes SET symbol = 'SH600519' WHERE market = 'CN'",
+            [],
+        )
+        .unwrap();
+    assert_eq!(load_quotes_from_db(&db).unwrap()[0].symbol, "sh600519");
+}
+
+#[test]
 fn test_quote_cache_empty() {
     let cache = QuoteCache::new();
     assert!(cache.get("US", "AAPL").is_none());

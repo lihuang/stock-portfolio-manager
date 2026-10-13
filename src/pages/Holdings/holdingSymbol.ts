@@ -1,11 +1,12 @@
 import type { Market } from "../../types";
+import { normalizeMainlandSymbolCase } from "../../lib/symbol.ts";
 
 const SH_PREFIXES = ["600", "601", "603", "605", "688", "900", "5"];
 const SZ_PREFIXES = ["000", "001", "002", "003", "004", "300", "301", "200", "15", "16"];
 
 /** Complete mainland exchange prefixes and bare Hong Kong stock codes. */
 export function normalizeHoldingSymbol(symbol: string, market?: Market): string {
-  const trimmed = symbol.trim();
+  const trimmed = market === "CN" ? normalizeMainlandSymbolCase(symbol.trim()) : symbol.trim();
   if (market === "HK" && /^\d{3,4}$/.test(trimmed)) {
     return `${Number.parseInt(trimmed, 10)}.HK`;
   }

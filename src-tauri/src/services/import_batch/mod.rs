@@ -42,8 +42,16 @@ fn states(
         )
         .map_err(|e| e.to_string())?;
     Ok((
-        before.as_deref().map(decode).transpose()?,
-        after.as_deref().map(decode).transpose()?,
+        before
+            .as_deref()
+            .map(decode)
+            .transpose()?
+            .map(state::normalize),
+        after
+            .as_deref()
+            .map(decode)
+            .transpose()?
+            .map(state::normalize),
     ))
 }
 fn read_batch(conn: &Connection, id: &str) -> Result<ImportBatch, String> {
@@ -52,13 +60,14 @@ fn read_batch(conn: &Connection, id: &str) -> Result<ImportBatch, String> {
     batch.rows = stmt
         .query_map([id], |r| {
             let data: String = r.get(3)?;
-            let data = serde_json::from_str(&data).map_err(|e| {
+            let mut data = serde_json::from_str(&data).map_err(|e| {
                 rusqlite::Error::FromSqlConversionFailure(
                     3,
                     rusqlite::types::Type::Text,
                     Box::new(e),
                 )
             })?;
+            state::normalize_symbol(&mut data);
             Ok(ImportBatchRow {
                 key: r.get(0)?,
                 raw: serde_json::from_str(&r.get::<_, String>(1)?).map_err(|e| {
@@ -87,8 +96,19 @@ fn read_batch(conn: &Connection, id: &str) -> Result<ImportBatch, String> {
                 |r| r.get(0),
             )
             .map_err(|e| e.to_string())?;
-        batch.reconciliation =
-            state::reconciliation(&before, &after, &decode::<Vec<ExpectedBalance>>(&expected)?);
+        let account_market: String = conn
+            .query_row(
+                "SELECT market FROM accounts WHERE id=?1",
+                [&batch.account_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        batch.reconciliation = state::reconciliation(
+            &before,
+            &after,
+            &decode::<Vec<ExpectedBalance>>(&expected)?,
+            &account_market,
+        );
         if batch.status == "applied" {
             let unchanged = state::capture(conn, &batch.account_id)? == after;
             batch.can_undo = unchanged && batch.rows.iter().any(|r| r.status == "imported");
@@ -290,7 +310,7 @@ pub fn apply_import_batch(
         let after = state::capture(&tx, &batch.account_id)?;
         state::invalidate_daily(&tx, &current, &after)?;
         tx.execute(
-            "UPDATE import_batches SET status='applied',before_state=?2,after_state=?3 WHERE id=?1",
+            "UPDATE import_batches SET status='applied',before_state=COALESCE(before_state,?2),after_state=?3 WHERE id=?1",
             params![id, json(&before)?, json(&after)?],
         )
         .map_err(|e| e.to_string())?;
@@ -332,11 +352,24 @@ pub fn reconcile_import_batch(
     id: &str,
     balances: &[ExpectedBalance],
 ) -> Result<ImportBatch, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let batch = read_batch(&conn, id)?;
+    if batch.status != "applied" {
+        return Err("仅可核对已提交批次".into());
+    }
+    let identity_state = state::capture(&conn, &batch.account_id)?;
+    let account_market: String = conn
+        .query_row(
+            "SELECT market FROM accounts WHERE id=?1",
+            [&batch.account_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
     let mut seen = HashSet::new();
     let balances: Vec<_> = balances
         .iter()
         .map(|b| ExpectedBalance {
-            symbol: b.symbol.trim().to_uppercase(),
+            symbol: state::expected_symbol(&b.symbol, &identity_state, &account_market),
             expected_shares: b.expected_shares,
         })
         .collect();
@@ -344,11 +377,6 @@ pub fn reconcile_import_batch(
         b.symbol.is_empty() || !b.expected_shares.is_finite() || !seen.insert(b.symbol.clone())
     }) {
         return Err("对账证券代码须唯一且非空，余额须为有效数值".into());
-    }
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let batch = read_batch(&conn, id)?;
-    if batch.status != "applied" {
-        return Err("仅可核对已提交批次".into());
     }
     conn.execute(
         "UPDATE import_batches SET expected_balances=?2 WHERE id=?1",

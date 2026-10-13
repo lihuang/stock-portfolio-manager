@@ -222,6 +222,23 @@ test("broker symbol normalization only rewrites exact US share-class aliases", (
   assert.equal(formatBrokerSymbol("00133.00.HK", "HK"), "133.HK");
 });
 
+test("broker mainland codes use lowercase exchange prefixes without lowercasing other markets", () => {
+  for (const [input, expected] of [[" SH600036 ", "sh600036"], ["Sz000001", "sz000001"], ["BJ920001", "bj920001"]]) {
+    assert.equal(formatBrokerSymbol(input, "CN"), expected);
+  }
+  assert.equal(formatBrokerSymbol("aapl", "US"), "AAPL");
+  assert.equal(formatBrokerSymbol("700.hk", "HK"), "700.HK");
+  assert.equal(formatBrokerSymbol("$cash-cny", "CN"), "$CASH-CNY");
+  assert.equal(formatBrokerSymbol("600036", "CN"), "600036");
+  assert.equal(formatBrokerSymbol("SH60003", "CN"), "SH60003");
+});
+
+test("broker non-mainland markets retain their existing exchange-code formatting", () => {
+  assert.equal(formatBrokerSymbol("SH600036", "US"), "SH600036");
+  assert.equal(formatBrokerSymbol("SH600036", "HK"), "600036.HK");
+  assert.equal(formatBrokerSymbol("SH600036", undefined), "SH600036");
+});
+
 test("IB dividends normalize share-class aliases and keep the original description", () => {
   for (const input of ["BRK B", "BRK.B", "BRK_B", "BRK-B", "brk  b"]) {
     const raw = `2026-09-17,${input}(US123) Cash Dividend USD 0.5,50`;

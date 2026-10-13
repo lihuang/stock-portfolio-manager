@@ -16,7 +16,7 @@ fn canonical_symbol(symbol: &str, market: &str) -> String {
         });
         return pattern.replace(&normalized, "$1-$2").into_owned();
     }
-    normalized
+    crate::symbols::normalize_cn_stock_symbol(&normalized, market)
 }
 
 pub(super) fn normalize(kind: &str, account: &str, value: &Value) -> Result<Value, String> {

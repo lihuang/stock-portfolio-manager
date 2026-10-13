@@ -2,6 +2,7 @@ use crate::models::{Holding, Transaction};
 use crate::services::position_replay::{rebuild_position_group, PositionKey};
 use crate::services::quote_service::{cash_display_name, is_cash_symbol, CASH_SYMBOL_PREFIX};
 use crate::services::snapshot_cache_service::{invalidate_from, snapshot_date};
+use crate::symbols::normalize_cn_stock_symbol;
 use rusqlite::{Connection, OptionalExtension};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -231,6 +232,10 @@ pub(crate) fn validate_cash_withdrawal(
 }
 
 pub fn create_holding_in(conn: &Connection, input: &CreateHoldingInput) -> Result<Holding, String> {
+    let input = &CreateHoldingInput {
+        symbol: normalize_cn_stock_symbol(&input.symbol, &input.market),
+        ..input.clone()
+    };
     validate_holding_values(
         &input.market,
         &input.symbol,
@@ -352,6 +357,10 @@ pub fn create_transaction_in(
     conn: &Connection,
     input: &CreateTransactionInput,
 ) -> Result<Transaction, String> {
+    let input = &CreateTransactionInput {
+        symbol: normalize_cn_stock_symbol(&input.symbol, &input.market),
+        ..input.clone()
+    };
     require_caller_transaction(conn)?;
     validate_transaction_values(input)?;
     let transaction_id = uuid::Uuid::new_v4().to_string();
@@ -487,6 +496,10 @@ pub(crate) fn update_transaction_in(
     id: &str,
     input: &CreateTransactionInput,
 ) -> Result<Transaction, String> {
+    let input = &CreateTransactionInput {
+        symbol: normalize_cn_stock_symbol(&input.symbol, &input.market),
+        ..input.clone()
+    };
     require_caller_transaction(conn)?;
     validate_transaction_values(input)?;
     let old_transaction = transaction_by_id(conn, id)?;
@@ -679,6 +692,64 @@ mod tests {
             traded_at: traded_at.to_string(),
             notes: None,
         }
+    }
+
+    #[test]
+    fn cn_holding_creation_and_edit_store_lowercase_codes_and_openings() {
+        let db = database_with_account();
+        let mut input = CreateHoldingInput {
+            account_id: "account-1".into(),
+            symbol: " SH600036 ".into(),
+            name: "Bank".into(),
+            market: "CN".into(),
+            category_id: None,
+            shares: 100.0,
+            avg_cost: 40.0,
+            currency: "CNY".into(),
+        };
+        let holding = create_holding_in(&db.conn.lock().unwrap(), &input).unwrap();
+        assert_eq!(holding.symbol, "sh600036");
+        input.symbol = "SZ000001".into();
+        let edited = crate::services::holding_edit::update_holding(&db, holding.id, input).unwrap();
+        assert_eq!(edited.symbol, "sz000001");
+        let opening: (String, f64) = db
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT symbol,total_amount FROM transactions WHERE transaction_type='OPEN'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(opening, ("sz000001".into(), 4000.0));
+    }
+
+    #[test]
+    fn cn_transaction_create_and_update_store_lowercase_and_replay_one_position() {
+        let db = database_with_account();
+        let mut conn = db.conn.lock().unwrap();
+        let tx = conn.transaction().unwrap();
+        let mut input = stock_transaction("BUY", 100.0, 40.0, 4000.0, "2026-09-01");
+        input.symbol = " SH600036 ".into();
+        input.market = "CN".into();
+        input.currency = "CNY".into();
+        let created = create_transaction_in(&tx, &input).unwrap();
+        assert_eq!(created.symbol, "sh600036");
+        input.symbol = "Sh600036".into();
+        input.shares = 200.0;
+        input.total_amount = 8000.0;
+        let edited = update_transaction_in(&tx, &created.id, &input).unwrap();
+        assert_eq!(edited.symbol, "sh600036");
+        assert_eq!(edited.holding_id, created.holding_id);
+        let position: (String, f64) = tx
+            .query_row(
+                "SELECT symbol,shares FROM holdings WHERE symbol NOT LIKE '$CASH-%'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(position, ("sh600036".into(), 200.0));
     }
 
     fn seed_buy_then_sell(database: &Database) -> (String, String) {

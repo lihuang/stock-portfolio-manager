@@ -9,6 +9,39 @@ pub(super) struct AccountState {
     pub holdings: Vec<Value>,
     pub transactions: Vec<Value>,
 }
+
+/// Normalize a working copy; persisted source data and audit snapshots stay intact.
+pub(super) fn normalize_symbol(row: &mut Value) {
+    if let (Some(symbol), Some(market)) = (row["symbol"].as_str(), row["market"].as_str()) {
+        let normalized = crate::symbols::normalize_cn_stock_symbol(symbol, market);
+        if normalized != symbol {
+            row["symbol"] = Value::String(normalized);
+        }
+    }
+}
+
+pub(super) fn normalize(mut state: AccountState) -> AccountState {
+    for row in state.holdings.iter_mut().chain(&mut state.transactions) {
+        normalize_symbol(row);
+    }
+    state
+}
+
+pub(super) fn expected_symbol(symbol: &str, state: &AccountState, account_market: &str) -> String {
+    let upper = symbol.trim().to_uppercase();
+    let market = state
+        .holdings
+        .iter()
+        .chain(&state.transactions)
+        .find(|row| {
+            row["symbol"]
+                .as_str()
+                .is_some_and(|stored| stored.eq_ignore_ascii_case(&upper))
+        })
+        .and_then(|row| row["market"].as_str())
+        .unwrap_or(account_market);
+    crate::symbols::normalize_cn_stock_symbol(&upper, market)
+}
 fn table_rows(conn: &Connection, table: &str, account: &str) -> Result<Vec<Value>, String> {
     let mut stmt = conn
         .prepare(&format!(
@@ -47,16 +80,17 @@ fn table_rows(conn: &Connection, table: &str, account: &str) -> Result<Vec<Value
     Ok(rows)
 }
 pub(super) fn capture(conn: &Connection, account: &str) -> Result<AccountState, String> {
-    Ok(AccountState {
+    Ok(normalize(AccountState {
         holdings: table_rows(conn, "holdings", account)?,
         transactions: table_rows(conn, "transactions", account)?,
-    })
+    }))
 }
 pub(super) fn restore(
     conn: &Connection,
     account: &str,
     state: &AccountState,
 ) -> Result<(), String> {
+    let state = normalize(state.clone());
     // Only transactions reference holdings in the schema. Both tables belong to
     // the guarded account; all original IDs and timestamps are restored exactly.
     conn.execute("DELETE FROM transactions WHERE account_id=?1", [account])
@@ -99,7 +133,22 @@ pub(super) fn reconciliation(
     before: &AccountState,
     after: &AccountState,
     expected: &[ExpectedBalance],
+    account_market: &str,
 ) -> Vec<ReconciliationRow> {
+    let before = normalize(before.clone());
+    let after = normalize(after.clone());
+    let mut identity_state = after.clone();
+    identity_state.holdings.extend(before.holdings.clone());
+    identity_state
+        .transactions
+        .extend(before.transactions.clone());
+    let expected: Vec<_> = expected
+        .iter()
+        .map(|balance| ExpectedBalance {
+            symbol: expected_symbol(&balance.symbol, &identity_state, account_market),
+            expected_shares: balance.expected_shares,
+        })
+        .collect();
     let mut symbols: BTreeSet<String> = before
         .holdings
         .iter()
@@ -118,8 +167,8 @@ pub(super) fn reconciliation(
                     .map(|r| r["shares"].as_f64().unwrap_or(0.0))
                     .sum::<f64>()
             };
-            let before_shares = amount(before);
-            let after_shares = amount(after);
+            let before_shares = amount(&before);
+            let after_shares = amount(&after);
             let expected_shares = expected
                 .iter()
                 .find(|e| e.symbol == symbol)

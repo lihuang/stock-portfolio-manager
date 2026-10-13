@@ -1,7 +1,8 @@
 use super::*;
 
 /// Return all transactions within the quarter of the given snapshot, grouped by
-/// stock symbol. OPEN-type transactions (initial position entries) are excluded.
+/// market and normalized stock symbol. OPEN-type transactions (initial position
+/// entries) are excluded.
 pub fn get_quarterly_transactions(
     db: &Database,
     snapshot_id: &str,
@@ -40,7 +41,9 @@ pub fn get_quarterly_transactions(
                AND symbol NOT LIKE '$CASH-%'
                AND DATE(traded_at) >= ?1
                AND DATE(traded_at) < ?2
-             ORDER BY CASE market WHEN 'CN' THEN 1 WHEN 'HK' THEN 2 ELSE 3 END, symbol ASC, traded_at ASC",
+             ORDER BY CASE market WHEN 'CN' THEN 1 WHEN 'HK' THEN 2 ELSE 3 END,
+                      UPPER(TRIM(symbol)) ASC, JULIANDAY(traded_at) ASC,
+                      JULIANDAY(created_at) ASC, id ASC",
         )
         .map_err(|e| e.to_string())?;
 
@@ -68,17 +71,23 @@ pub fn get_quarterly_transactions(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
 
-    // Group by symbol, preserving insertion order (symbols are already sorted)
+    // Imports and manual entries may use different casing for the same security.
+    // Normalize only the group identity/display, retaining the original trade data.
     let mut groups: Vec<StockTransactionGroup> = Vec::new();
-    let mut symbol_index: HashMap<String, usize> = HashMap::new();
+    let mut symbol_index: HashMap<(String, String), usize> = HashMap::new();
 
     for txn in txns {
-        let idx = if let Some(&i) = symbol_index.get(&txn.symbol) {
+        let symbol = crate::symbols::normalize_cn_stock_symbol(
+            &txn.symbol.trim().to_ascii_uppercase(),
+            &txn.market,
+        );
+        let key = (txn.market.clone(), symbol.clone());
+        let idx = if let Some(&i) = symbol_index.get(&key) {
             i
         } else {
             let i = groups.len();
             groups.push(StockTransactionGroup {
-                symbol: txn.symbol.clone(),
+                symbol,
                 name: txn.name.clone(),
                 market: txn.market.clone(),
                 currency: txn.currency.clone(),
@@ -90,7 +99,7 @@ pub fn get_quarterly_transactions(
                 total_sell_amount: 0.0,
                 transactions: Vec::new(),
             });
-            symbol_index.insert(txn.symbol.clone(), i);
+            symbol_index.insert(key, i);
             i
         };
 
@@ -113,3 +122,7 @@ pub fn get_quarterly_transactions(
 
     Ok(groups)
 }
+
+#[cfg(test)]
+#[path = "transactions_tests.rs"]
+mod tests;

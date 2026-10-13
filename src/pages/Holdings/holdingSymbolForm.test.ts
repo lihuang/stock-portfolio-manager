@@ -105,6 +105,9 @@ function exerciseHoldingForm(cases) {
 }
 
 const cnSymbols = [
+  { symbol: "SH600036", expected: "sh600036" },
+  { symbol: "Sz000001", expected: "sz000001" },
+  { symbol: "BJ920001", expected: "bj920001" },
   { symbol: "601069", expected: "sh601069" },
   { symbol: "603019", expected: "sh603019" },
   { symbol: "605117", expected: "sh605117" },

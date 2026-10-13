@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Input, InputNumber, Modal, Space, Table, Tag, Typography, message } from "antd";
 import { invoke } from "@tauri-apps/api/core";
 import type { ImportBatch, ImportBatchRow } from "./batchTypes";
-import { addExpectedBalance, reconciliationDisplayRows, reconciliationMatches, batchReconciliationArgs, batchApplyArgs, initialBatchSelection, selectableBatchRow, selectionAfterBatchResponse } from "./batchPanelState";
+import { addExpectedBalance, normalizeReconciliationSymbol, reconciliationDisplayRows, reconciliationMatches, batchReconciliationArgs, batchApplyArgs, initialBatchSelection, selectableBatchRow, selectionAfterBatchResponse } from "./batchPanelState";
 
 interface Props {
   batch: ImportBatch;
@@ -143,7 +143,7 @@ export default function ImportBatchPanel({batch, onChange, onImported, onBusyCha
   const addBalance = () => {
     try {
       const updated = addExpectedBalance(batch, balances, newSymbol, newExpected);
-      dirtyBalances.current.add(newSymbol.trim().toUpperCase());
+      dirtyBalances.current.add(normalizeReconciliationSymbol(batch, newSymbol.trim().toUpperCase()));
       setBalances(updated);
       setNewSymbol("");
       setNewExpected(null);

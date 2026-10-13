@@ -68,3 +68,33 @@ test("broker-only balance entry rejects empty and normalized duplicate symbols",
   assert.throws(()=>addExpectedBalance(current, {MSFT:3}, " msft ", 1), /已存在/);
   assert.throws(()=>addExpectedBalance(current, {}, "MSFT", null), /有效数量/);
 });
+
+test("mainland reconciliation entry and submission use lowercase codes and reject case duplicates", () => {
+  const current = {...batch, reconciliation:[{symbol:"SH600036", expected_shares:100}]};
+  assert.throws(()=>addExpectedBalance(current, {}, "sh600036", 100), /已存在/);
+  assert.throws(()=>addExpectedBalance(current, {sz000001:10}, "SZ000001", 20), /已存在/);
+  const balances = addExpectedBalance(current, {}, " Sz000001 ", 10);
+  assert.deepEqual(balances, {sz000001:10});
+  assert.deepEqual(batchReconciliationArgs(current, {SH600036:100, ...balances, BJ920001:5, AAPL:2, "700.HK":3, "$CASH-CNY":1000}).balances, [
+    {symbol:"sh600036",expected_shares:100}, {symbol:"sz000001",expected_shares:10},
+    {symbol:"bj920001",expected_shares:5}, {symbol:"AAPL",expected_shares:2},
+    {symbol:"700.HK",expected_shares:3}, {symbol:"$CASH-CNY",expected_shares:1000},
+  ]);
+});
+
+test("reconciliation respects known batch row markets before inferring prefixes", () => {
+  const current = {...batch, reconciliation:[], rows:[
+    {data:{symbol:"SH600036",market:"US"}},
+    {data:{symbol:"SZ000001",market:"HK"}},
+    {data:{symbol:"BJ920001",market:"CN"}},
+  ]};
+  let balances = addExpectedBalance(current, {}, "sh600036", 1);
+  balances = addExpectedBalance(current, balances, "sz000001", 2);
+  balances = addExpectedBalance(current, balances, "bj920001", 3);
+  balances = addExpectedBalance(current, balances, "SH600519", 4);
+  assert.deepEqual(balances, {SH600036:1,SZ000001:2,bj920001:3,sh600519:4});
+  assert.deepEqual(batchReconciliationArgs(current, balances).balances, [
+    {symbol:"SH600036",expected_shares:1}, {symbol:"SZ000001",expected_shares:2},
+    {symbol:"bj920001",expected_shares:3}, {symbol:"sh600519",expected_shares:4},
+  ]);
+});

@@ -40,13 +40,19 @@ test("six-digit fund codes use the requested 5, 15 and 16 exchange rules", () =>
   }
 });
 
-test("other markets and explicit exchange prefixes are preserved", () => {
+test("other markets keep their existing bare-code behavior", () => {
   for (const market of ["US", "HK", undefined]) {
-    for (const symbol of ["601069", "900901", "200002", "510300", "159915", "161725"]) {
+    for (const symbol of ["601069", "900901", "200002", "510300", "159915", "161725", "SH600036", "Sz000001", "BJ920001", "AAPL", "700.HK"]) {
       assert.equal(normalizeHoldingSymbol(symbol, market), symbol);
     }
   }
-  for (const symbol of ["sh601069", "SH601069", "sz000001", "Sz300750", "sh900901", "sz200002", "SH510300", "SZ159915", "sz161725", "$CASH-CNY"]) {
+});
+
+test("recognized mainland prefixes are canonical lowercase while other symbols retain their case", () => {
+  for (const symbol of ["sh601069", "SH601069", "sz000001", "Sz300750", "sh900901", "sz200002", "SH510300", "SZ159915", "sz161725", "BJ920001", "bJ430047"]) {
+    assert.equal(normalizeHoldingSymbol(symbol, "CN"), symbol.toLowerCase());
+  }
+  for (const symbol of ["$CASH-CNY", "AAPL", "700.HK", "SH60003", "SZ0000011", "SHABCDEF", "XX600036"]) {
     assert.equal(normalizeHoldingSymbol(symbol, "CN"), symbol);
   }
 });

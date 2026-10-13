@@ -3,6 +3,7 @@ mod db;
 mod menu;
 mod models;
 mod services;
+mod symbols;
 
 use db::Database;
 use services::exchange_rate_service::ExchangeRateCache;

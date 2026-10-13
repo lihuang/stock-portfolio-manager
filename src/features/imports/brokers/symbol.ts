@@ -1,4 +1,5 @@
 import type { Market } from "../../../types";
+import { normalizeMainlandSymbolCase } from "../../../lib/symbol.ts";
 
 /** Normalize broker codes, including numeric symbols formatted by spreadsheets. */
 export function formatBrokerSymbol(symbol: string, market: Market): string {
@@ -14,5 +15,5 @@ export function formatBrokerSymbol(symbol: string, market: Market): string {
     const digits = integerSymbol.replace(/\D/g, "");
     if (digits) return `${Number.parseInt(digits, 10)}.HK`;
   }
-  return value;
+  return market === "CN" ? normalizeMainlandSymbolCase(value) : value;
 }

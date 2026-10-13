@@ -15,10 +15,12 @@ pub fn load_quotes_from_db(db: &Database) -> Result<Vec<StockQuote>, String> {
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
+            let symbol: String = row.get(0)?;
+            let market: String = row.get(2)?;
             Ok(StockQuote {
-                symbol: row.get(0)?,
+                symbol: crate::symbols::normalize_cn_stock_symbol(&symbol, &market),
                 name: row.get(1)?,
-                market: row.get(2)?,
+                market,
                 current_price: row.get(3)?,
                 previous_close: row.get(4)?,
                 change: row.get(5)?,
@@ -56,7 +58,7 @@ pub fn save_quotes_to_db(db: &Database, quotes: &[StockQuote]) -> Result<(), Str
         .map_err(|e| e.to_string())?;
     for q in quotes {
         stmt.execute(rusqlite::params![
-            q.symbol,
+            crate::symbols::normalize_cn_stock_symbol(&q.symbol, &q.market),
             q.name,
             q.market,
             q.current_price,
