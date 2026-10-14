@@ -329,7 +329,7 @@ export default function OverviewTab({ baseCurrency }: Props) {
           <span>-</span>
         ),
       align: "right" as const,
-      width: 80,
+      width: 85,
     },
   ], [aggregatedStocks, pnlColor]);
 
@@ -415,7 +415,7 @@ export default function OverviewTab({ baseCurrency }: Props) {
         dataIndex: "pnl_percent",
         key: "pnl_percent",
         align: "right" as const,
-        width: 80,
+        width: 85,
         render: (pnl: number | null) =>
           pnl != null ? (
             <span style={{ color: pnlColor(pnl) }}>

@@ -306,7 +306,7 @@ export default function MarketTab({ selectedMarket, onMarketChange }: Props) {
           <span>-</span>
         ),
       align: "right" as const,
-      width: 80,
+      width: 85,
     },
   ], [currencySymbol, pnlColor]);
 
@@ -391,7 +391,7 @@ export default function MarketTab({ selectedMarket, onMarketChange }: Props) {
         dataIndex: "pnl_percent",
         key: "pnl_percent",
         align: "right" as const,
-        width: 80,
+        width: 85,
         render: (pnl: number | null) =>
           pnl != null ? (
             <span style={{ color: pnlColor(pnl) }}>

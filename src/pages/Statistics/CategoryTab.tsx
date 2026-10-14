@@ -112,7 +112,7 @@ export default function CategoryTab({ selectedCategoryId, onCategoryChange, base
     { title: "仓位", dataIndex: "position_pct", key: "position_pct", align: "right", width: 70, render: (v: number) => `${v.toFixed(2)}%` },
     { title: "均价", dataIndex: "avg_cost", key: "avg_cost", align: "right", width: 90, render: (v: number) => v.toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 }) },
     { title: "盈亏金额", dataIndex: "pnl", key: "pnl", align: "right", width: 140, render: (v: number, r) => <span style={{ color: pnlColor(v) }}>{v >= 0 ? "+" : "-"}{formatMoney(Math.abs(v), r.currency)}</span> },
-    { title: "盈亏比例", dataIndex: "pnl_percent", key: "pnl_percent", align: "right", width: 80, render: (v: number | null) => v == null ? "-" : <span style={{ color: pnlColor(v) }}>{v >= 0 ? "+" : ""}{v.toFixed(2)}%</span> },
+    { title: "盈亏比例", dataIndex: "pnl_percent", key: "pnl_percent", align: "right", width: 85, render: (v: number | null) => v == null ? "-" : <span style={{ color: pnlColor(v) }}>{v >= 0 ? "+" : ""}{v.toFixed(2)}%</span> },
     { title: "交易", key: "transactions", align: "center", width: 80, render: (_, record) => <Button type="link" size="small" onClick={() => handleShowTransactions(record)}>明细</Button> },
   ], [handleShowTransactions, pnlColor]);
 
@@ -126,7 +126,7 @@ export default function CategoryTab({ selectedCategoryId, onCategoryChange, base
     { title: "市值", dataIndex: "market_value", key: "market_value", align: "right", width: 140, defaultSortOrder: "descend", sorter: (a, b) => a.market_value_usd - b.market_value_usd, render: (v: number, r) => formatMoney(v, r.currency) },
     { title: "仓位%", key: "position_pct", align: "right", width: 70, sorter: (a, b) => a.market_value_usd - b.market_value_usd, render: (_, r) => { const total = aggregatedStocks.reduce((sum, row) => sum + row.market_value_usd, 0); return `${(total > 0 ? r.market_value_usd / total * 100 : 0).toFixed(2)}%`; } },
     { title: "盈亏金额", dataIndex: "pnl", key: "pnl", align: "right", width: 140, sorter: (a, b) => a.pnl - b.pnl, render: (v: number, r) => <span style={{ color: pnlColor(v) }}>{v >= 0 ? "+" : "-"}{formatMoney(Math.abs(v), r.currency)}</span> },
-    { title: "盈亏比例", dataIndex: "pnl_percent", key: "pnl_percent", align: "right", width: 80, render: (v: number | null) => v == null ? "-" : <span style={{ color: pnlColor(v) }}>{v >= 0 ? "+" : ""}{v.toFixed(2)}%</span> },
+    { title: "盈亏比例", dataIndex: "pnl_percent", key: "pnl_percent", align: "right", width: 85, render: (v: number | null) => v == null ? "-" : <span style={{ color: pnlColor(v) }}>{v >= 0 ? "+" : ""}{v.toFixed(2)}%</span> },
   ], [aggregatedStocks, pnlColor]);
 
   return (

@@ -192,7 +192,7 @@ export default function HoldingsTable({ holdings, loading, hideAccountMarket = f
           <span>-</span>
         ),
       align: "right",
-      width: 80,
+      width: 90,
     },
     ];
     return hideAccountMarket
