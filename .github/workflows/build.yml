@@ -50,6 +50,40 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
+      - name: Configure macOS signing
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          names=(APPLE_SIGNING_IDENTITY APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID)
+          configured=0
+          for name in "${names[@]}"; do
+            if [[ -n "${!name}" ]]; then
+              configured=$((configured + 1))
+            fi
+          done
+          if [[ "$configured" == 0 ]]; then
+            echo 'APPLE_SIGNING_IDENTITY=-' >> "$GITHUB_ENV"
+          elif [[ "$configured" != "${#names[@]}" ]]; then
+            echo '::error::Configure all six Apple signing/notarization secrets, or leave all unset for ad-hoc signing.'
+            exit 1
+          else
+            for name in "${names[@]}"; do
+              # These credentials are single-line values (the certificate is Base64).
+              if [[ "${!name}" == *$'\n'* || "${!name}" == *$'\r'* ]]; then
+                echo "::error::$name must be a single-line value."
+                exit 1
+              fi
+              printf '%s=%s\n' "$name" "${!name}" >> "$GITHUB_ENV"
+            done
+          fi
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v1
         env:

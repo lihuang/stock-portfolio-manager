@@ -193,6 +193,33 @@ git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
+### macOS signing and notarization
+
+The default `bundle.macOS.signingIdentity: "-"` asks Tauri to ad-hoc sign the complete `.app`, including `Info.plist` and resources, instead of retaining only the Rust linker's executable signature. The latter can produce `code has no resources but signature indicates they must be present` and a misleading “app is damaged” dialog. CI builds a macOS app bundle and runs `codesign --verify --deep --strict` to catch regressions.
+
+**Ad-hoc signing is not Apple notarization.** Browser-downloaded builds may still require approval in System Settings → Privacy & Security. Passing signature integrity verification does not mean `spctl` will accept the app. Removing quarantine attributes or disabling Gatekeeper is not a release fix.
+
+For Gatekeeper-accepted releases, maintainers must configure these Actions secrets in the repository that publishes the release:
+
+| Secret | Value |
+| --- | --- |
+| `APPLE_SIGNING_IDENTITY` | Certificate identity: `Developer ID Application: … (TEAMID)` |
+| `APPLE_CERTIFICATE` | Base64-encoded `.p12` certificate including its private key |
+| `APPLE_CERTIFICATE_PASSWORD` | Password used to export the `.p12` |
+| `APPLE_ID` | Apple developer account email |
+| `APPLE_PASSWORD` | Apple **app-specific password**, not the account login password |
+| `APPLE_TEAM_ID` | Apple developer team ID |
+
+The release workflow passes these variables to Tauri for certificate import, signing and notarization, falling back to ad-hoc signing when unconfigured. Configure the complete notarization credentials alongside a Developer ID identity. Never commit certificates or passwords. See the [Tauri macOS signing guide](https://v2.tauri.app/distribute/sign/macos/). For local builds with a certificate installed, `APPLE_SIGNING_IDENTITY` overrides the default signing identity.
+
+Before publishing, download the actual artifact through a browser, install it and verify:
+
+```bash
+codesign --verify --deep --strict --verbose=2 /Applications/stock-portfolio-manager.app
+# Only Developer ID-signed and notarized builds should pass this assessment:
+spctl --assess --type execute --verbose=4 /Applications/stock-portfolio-manager.app
+```
+
 ## Data storage
 
 The main database is stored at `{app_data_dir}/portfolio.db` in the Tauri application data directory. The current application identifier is `com.portfolio.manager`. On macOS, the default path is:
