@@ -38,3 +38,30 @@ jobs:
 
       - name: Run repository checks
         run: bun run check
+
+  macos-signature:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Rust 1.97.1
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.97.1'
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      # No signing secrets are needed, including for pull requests from forks.
+      - name: Build macOS app bundle
+        run: bun run tauri build --bundles app
+
+      - name: Verify macOS bundle signature
+        run: codesign --verify --deep --strict --verbose=2 src-tauri/target/release/bundle/macos/stock-portfolio-manager.app

@@ -198,6 +198,33 @@ git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
+### macOS 签名与公证
+
+默认使用 `bundle.macOS.signingIdentity: "-"`，由 Tauri 对完整 `.app` 做 ad-hoc 签名（包括 `Info.plist` 和资源），而非仅保留 Rust 链接器对可执行文件的临时签名。后者可能导致 `code has no resources but signature indicates they must be present` 和“应用已损坏”的提示。CI 会构建 macOS 应用包并运行 `codesign --verify --deep --strict`，防止此问题回归。
+
+**Ad-hoc 签名不等于 Apple 公证。** 浏览器下载后的应用仍可能需要在“系统设置 → 隐私与安全性”中手动允许打开；签名完整性校验通过也不意味着 `spctl` 会接受它。不应把删除隔离标记或关闭 Gatekeeper 当作发布修复。
+
+要发布通过 Gatekeeper 验证的版本，维护者需在发布仓库的 Actions secrets 中配置：
+
+| Secret | 内容 |
+| --- | --- |
+| `APPLE_SIGNING_IDENTITY` | `Developer ID Application: … (TEAMID)` 证书身份 |
+| `APPLE_CERTIFICATE` | 含私钥的 `.p12` 证书文件的 Base64 内容 |
+| `APPLE_CERTIFICATE_PASSWORD` | `.p12` 导出密码 |
+| `APPLE_ID` | Apple 开发者账号邮箱 |
+| `APPLE_PASSWORD` | Apple 账号的 **App 专用密码**，不是登录密码 |
+| `APPLE_TEAM_ID` | Apple 开发者团队 ID |
+
+发布工作流将这些变量传给 Tauri，由其导入证书、签名并执行公证；未配置时使用 ad-hoc 签名。配置正式签名时应同时提供完整公证凭据。不要把证书或密码提交到仓库。详见 [Tauri macOS 签名文档](https://v2.tauri.app/distribute/sign/macos/)。本地已有证书时，可通过 `APPLE_SIGNING_IDENTITY` 环境变量覆盖默认签名身份。
+
+发布前从浏览器下载实际产物，安装后验证：
+
+```bash
+codesign --verify --deep --strict --verbose=2 /Applications/stock-portfolio-manager.app
+# 仅正式签名并完成公证的版本应通过下面的评估：
+spctl --assess --type execute --verbose=4 /Applications/stock-portfolio-manager.app
+```
+
 ## 数据存储
 
 主数据库位于 Tauri 的应用数据目录：`{app_data_dir}/portfolio.db`。当前应用标识为 `com.portfolio.manager`，macOS 上的默认路径为：
