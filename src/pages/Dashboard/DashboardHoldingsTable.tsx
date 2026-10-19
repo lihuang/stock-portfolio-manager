@@ -38,7 +38,7 @@ function valueColumns<T extends DashboardAccountHolding | DashboardStockHolding>
       render: (shares: number, record: T) => formatHoldingShares(shares, record.symbol),
     },
     {
-      title: "市值", dataIndex: "market_value", key: "market_value", width: 145, align: "right",
+      title: "市值", dataIndex: "market_value", key: "market_value", width: 150, align: "right",
       sorter: (a, b) => a.market_value_usd - b.market_value_usd,
       defaultSortOrder: "descend",
       render: (value: number, record: T) => formatMoney(value, record.currency),
@@ -57,7 +57,7 @@ function valueColumns<T extends DashboardAccountHolding | DashboardStockHolding>
       }),
     },
     {
-      title: "盈亏金额", dataIndex: "pnl", key: "pnl", width: 145, align: "right",
+      title: "盈亏金额", dataIndex: "pnl", key: "pnl", width: 150, align: "right",
       sorter: (a, b) => a.pnl - b.pnl,
       render: (value: number, record: T) => (
         <span style={{ color: pnlColor(value) }}>
