@@ -58,6 +58,228 @@ fn insert_exposure_record(
         .unwrap();
 }
 
+fn insert_close_detail_record(
+    db: &Database,
+    account_id: &str,
+    record: (&str, &str, &str, i64, f64, f64, f64, f64, &str),
+) {
+    let (id, action, code, quantity, price, amount, commission, fee, traded_at) = record;
+    db.conn
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO option_records
+             (id, account_id, option_symbol, underlying, expiry_date, strike_price,
+              option_type, action, code, quantity, price, amount, commission, fee,
+              traded_at, created_at, contract_status)
+             VALUES (?1, ?2, 'BABA 15JAN27 160 C', 'BABA', '15JAN27', 160, 'C',
+                     ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, 'active')",
+            rusqlite::params![
+                id, account_id, action, code, quantity, price, amount, commission, fee, traded_at
+            ],
+        )
+        .unwrap();
+}
+
+#[test]
+fn test_closed_details_use_recorded_buyback_amount_for_baba_realized_pnl() {
+    let (db, account_id) = db_with_account();
+    insert_close_detail_record(
+        &db,
+        &account_id,
+        (
+            "open",
+            "SELL",
+            "O",
+            -10,
+            11.3,
+            11_300.0,
+            -4.9,
+            0.0,
+            "2026-08-01",
+        ),
+    );
+    insert_close_detail_record(
+        &db,
+        &account_id,
+        (
+            "close",
+            "BUY",
+            "C",
+            10,
+            5.2,
+            -5_200.0,
+            -4.44,
+            0.0,
+            "2026-08-02",
+        ),
+    );
+
+    let contracts = get_option_contracts_inner(&db, &account_id).unwrap();
+    let contract = serde_json::to_value(&contracts[0]).unwrap();
+    assert_eq!(contract["status"], "closed");
+    let details = contract
+        .get("close_details")
+        .expect("closed contract must expose buyback details");
+    assert_eq!(details["close_cost"], 5_200.0);
+    assert!((details["fees"].as_f64().unwrap() - 9.34).abs() < 1e-9);
+    assert!((details["realized_pnl"].as_f64().unwrap() - 6_090.66).abs() < 1e-9);
+    assert_eq!(
+        details["records"],
+        serde_json::json!([{
+            "id": "close", "code": "C", "quantity": 10, "price": 5.2,
+            "amount": 5_200.0, "commission": 4.44, "fee": 0.0,
+            "traded_at": "2026-08-02"
+        }])
+    );
+}
+
+#[test]
+fn test_closed_details_prorate_shared_fifo_closes_and_keep_chronological_records() {
+    let (db, account_id) = db_with_account();
+    for record in [
+        (
+            "open-old",
+            "SELL",
+            "O",
+            -6,
+            10.0,
+            6_000.0,
+            -3.0,
+            -1.0,
+            "2026-08-01",
+        ),
+        (
+            "open-new",
+            "SELL",
+            "O",
+            -4,
+            12.0,
+            4_800.0,
+            -2.0,
+            -0.5,
+            "2026-08-02",
+        ),
+        (
+            "close-final",
+            "BUY",
+            "C;P",
+            2,
+            2.0,
+            -400.0,
+            -1.0,
+            -0.5,
+            "2026-08-05",
+        ),
+        (
+            "close-shared",
+            "BUY",
+            "C",
+            6,
+            4.0,
+            -2_400.0,
+            -6.0,
+            -3.0,
+            "2026-08-04",
+        ),
+        (
+            "expire-part",
+            "BUY",
+            "C;Ep",
+            2,
+            0.0,
+            0.0,
+            -0.5,
+            -0.25,
+            "2026-08-03",
+        ),
+    ] {
+        insert_close_detail_record(&db, &account_id, record);
+    }
+
+    let contracts = get_option_contracts_inner(&db, &account_id).unwrap();
+    let oldest = contracts
+        .iter()
+        .find(|contract| contract.id == "open-old")
+        .unwrap();
+    let newest = contracts
+        .iter()
+        .find(|contract| contract.id == "open-new")
+        .unwrap();
+    let oldest = serde_json::to_value(oldest).unwrap();
+    let newest = serde_json::to_value(newest).unwrap();
+    let old_details = oldest
+        .get("close_details")
+        .expect("oldest closed batch needs allocations");
+    let new_details = newest
+        .get("close_details")
+        .expect("newest closed batch needs allocations");
+
+    assert_eq!(old_details["close_cost"], 1_600.0);
+    assert_eq!(old_details["fees"], 10.75);
+    assert_eq!(old_details["realized_pnl"], 4_389.25);
+    assert_eq!(
+        old_details["records"],
+        serde_json::json!([
+            { "id": "expire-part", "code": "C;Ep", "quantity": 2, "price": 0.0,
+              "amount": 0.0, "commission": 0.5, "fee": 0.25, "traded_at": "2026-08-03" },
+            { "id": "close-shared", "code": "C", "quantity": 4, "price": 4.0,
+              "amount": 1_600.0, "commission": 4.0, "fee": 2.0, "traded_at": "2026-08-04" }
+        ])
+    );
+    assert_eq!(new_details["close_cost"], 1_200.0);
+    assert_eq!(new_details["fees"], 7.0);
+    assert_eq!(new_details["realized_pnl"], 3_593.0);
+    assert_eq!(
+        new_details["records"],
+        serde_json::json!([
+            { "id": "close-shared", "code": "C", "quantity": 2, "price": 4.0,
+              "amount": 800.0, "commission": 2.0, "fee": 1.0, "traded_at": "2026-08-04" },
+            { "id": "close-final", "code": "C;P", "quantity": 2, "price": 2.0,
+              "amount": 400.0, "commission": 1.0, "fee": 0.5, "traded_at": "2026-08-05" }
+        ])
+    );
+}
+
+#[test]
+fn test_close_details_are_null_for_active_expired_and_assigned_contracts() {
+    for (close_code, close_quantity, expected_status) in [
+        ("C", 1, "active"),
+        ("C;Ep", 2, "expired"),
+        ("A;C", 2, "assigned"),
+    ] {
+        let (db, account_id) = db_with_account();
+        insert_close_detail_record(
+            &db,
+            &account_id,
+            ("open", "SELL", "O", -2, 2.0, 400.0, -1.0, 0.0, "2026-08-01"),
+        );
+        insert_close_detail_record(
+            &db,
+            &account_id,
+            (
+                "close",
+                "BUY",
+                close_code,
+                close_quantity,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                "2026-08-02",
+            ),
+        );
+
+        let contracts = get_option_contracts_inner(&db, &account_id).unwrap();
+        let contract = serde_json::to_value(&contracts[0]).unwrap();
+        assert_eq!(contract["status"], expected_status);
+        assert_eq!(
+            contract.get("close_details"),
+            Some(&serde_json::Value::Null)
+        );
+    }
+}
+
 #[test]
 fn test_partial_close_exposes_remaining_quantity_without_changing_opening_facts() {
     for (option_type, open_quantity, remaining_quantity) in [("P", 10, 6), ("C", -10, -6)] {

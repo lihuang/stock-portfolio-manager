@@ -39,8 +39,29 @@ pub struct OptionContract {
     pub traded_at: Option<String>, // trade date of the open record
     pub close_price: Option<f64>,
     pub close_code: Option<String>, // "C;Ep" (expired), "A;C" (assigned), "C;P" (closed)
+    pub close_details: Option<OptionCloseDetails>, // allocated closes for fully closed batches
     pub status: String,             // "active", "expired", "assigned", "closed"
     pub account_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OptionCloseDetails {
+    pub records: Vec<OptionCloseRecord>,
+    pub close_cost: f64,
+    pub fees: f64,
+    pub realized_pnl: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OptionCloseRecord {
+    pub id: String,
+    pub code: String,
+    pub quantity: i64, // positive quantity allocated to this opening batch
+    pub price: f64,
+    pub amount: f64, // positive allocated closing cost
+    pub commission: f64,
+    pub fee: f64,
+    pub traded_at: Option<String>,
 }
 
 /// Sell Put simulation result per stock

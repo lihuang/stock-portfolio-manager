@@ -1058,6 +1058,26 @@ export interface QuoteProviderConfig {
 }
 
 // Options Management types
+export interface OptionCloseRecord {
+  id: string;
+  code: string;
+  quantity: number;
+  price: number;
+  /** Buyback cost and fees allocated to this opening record, as positive amounts. */
+  amount: number;
+  commission: number;
+  fee: number;
+  traded_at: string | null;
+}
+
+export interface OptionCloseDetails {
+  records: OptionCloseRecord[];
+  close_cost: number;
+  /** All opening and allocated closing commissions and fees. */
+  fees: number;
+  realized_pnl: number;
+}
+
 export interface OptionContract {
   id: string;
   option_symbol: string;
@@ -1075,6 +1095,7 @@ export interface OptionContract {
   traded_at: string | null;
   close_price: number | null;
   close_code: string | null;
+  close_details: OptionCloseDetails | null;
   status: "active" | "expired" | "assigned" | "closed";
   account_id: string;
 }

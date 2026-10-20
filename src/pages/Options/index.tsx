@@ -52,6 +52,7 @@ import {
 import type { ActiveUnderlyingSummary } from "./activeOptionsViewModel";
 import { formatMoney } from "../../lib/formatMoney";
 import OptionsCsvImport from "./OptionsCsvImport";
+import ClosedOptionDetails from "./ClosedOptionDetails";
 
 const { Title, Text } = Typography;
 
@@ -102,6 +103,11 @@ export default function OptionsPage() {
   >(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [confirmName, setConfirmName] = useState("");
+  const [expandedCompletedRowKeys, setExpandedCompletedRowKeys] = useState<string[]>([]);
+
+  useEffect(() => {
+    setExpandedCompletedRowKeys([]);
+  }, [selectedAccountId, selectedExpiredUnderlying]);
 
   const selectedAccountName = useMemo(() => {
     return accounts.find((a) => a.id === selectedAccountId)?.name || "";
@@ -202,6 +208,7 @@ export default function OptionsPage() {
     traded_at: string | null;
     close_price: number | null;
     close_code: string | null;
+    close_details: OptionContract["close_details"];
     status: string;
     children?: OptionContract[];
   }
@@ -233,6 +240,7 @@ export default function OptionsPage() {
           traded_at: c.traded_at,
           close_price: c.close_price,
           close_code: c.close_code,
+          close_details: c.close_details,
           status: c.status,
         };
       }
@@ -257,6 +265,7 @@ export default function OptionsPage() {
         traded_at: first.traded_at,
         close_price: first.close_price,
         close_code: first.close_code,
+        close_details: null,
         status: first.status,
         children: items,
       };
@@ -510,13 +519,13 @@ export default function OptionsPage() {
       title: "期权标识",
       dataIndex: "option_symbol",
       key: "option_symbol",
-      width: 230,
+      width: 225,
     },
     {
       title: "股票",
       dataIndex: "underlying",
       key: "underlying",
-      width: 75,
+      width: 70,
       render: (v: string) => <Tag color="blue">{v}</Tag>,
     },
     {
@@ -547,7 +556,7 @@ export default function OptionsPage() {
       title: "开仓合约数",
       dataIndex: "contracts",
       key: "contracts",
-      width: 105,
+      width: 115,
     },
     {
       title: "未平仓合约数",
@@ -559,7 +568,7 @@ export default function OptionsPage() {
       title: "开仓价",
       dataIndex: "open_price",
       key: "open_price",
-      width: 75,
+      width: 70,
       render: (v: number) => formatMoney(v, "USD", 2, { useGrouping: false }),
     },
     {
@@ -575,7 +584,7 @@ export default function OptionsPage() {
       title: "佣金",
       dataIndex: "commission",
       key: "commission",
-      width: 75,
+      width: 70,
       render: (v: number) => (
         <Text type="secondary">${Math.abs(v).toLocaleString()}</Text>
       ),
@@ -584,23 +593,49 @@ export default function OptionsPage() {
       title: "交易时间",
       dataIndex: "traded_at",
       key: "traded_at",
-      width: 115,
+      width: 130,
       render: (v: string | null) => v ? v.substring(0, 10) : "-",
     },
   ];
 
   // Table columns for expired contracts
-  const expiredColumns = [
+  const toggleCompletedRow = (record: GroupedContract) => {
+    const key = getOptionContractRowKey(record);
+    setExpandedCompletedRowKeys((current) =>
+      current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [...current, key],
+    );
+  };
+
+  const expiredColumns: ColumnsType<GroupedContract> = [
     ...activeColumns.filter((column) => column.key !== "remaining_contracts"),
     {
       title: "结果",
       dataIndex: "status",
       key: "result",
       width: 75,
-      render: (v: string) => {
+      render: (v: string, record) => {
         if (v === "assigned") return <Tag color="red">被执行</Tag>;
         if (v === "expired") return <Tag color="green">已到期</Tag>;
-        if (v === "closed") return <Tag color="blue">已平仓</Tag>;
+        if (v === "closed") {
+          const expanded = expandedCompletedRowKeys.includes(getOptionContractRowKey(record));
+          return (
+            <Button
+              type="link"
+              size="small"
+              style={{ padding: 0, height: "auto", border: 0 }}
+              aria-expanded={expanded}
+              title="查看平仓记录及损益"
+              onClick={(event) => {
+                event.stopPropagation();
+                toggleCompletedRow(record);
+              }}
+            >
+              <Tag color="blue">已平仓</Tag>
+            </Button>
+          );
+        }
         return <Tag>未知</Tag>;
       },
     },
@@ -611,6 +646,47 @@ export default function OptionsPage() {
     : selectedAccountCurrency || "USD";
   const formatOptionReviewCurrency = (value: number) =>
     formatMoney(value, optionReviewCurrency);
+
+  const renderCompletedTable = (rows: GroupedContract[]) => (
+    <Table<GroupedContract>
+      dataSource={rows}
+      columns={expiredColumns}
+      rowKey={getOptionContractRowKey}
+      size="small"
+      pagination={false}
+      expandable={{
+        // Grouped openings use a nested table so each opening can expand its own closes.
+        childrenColumnName: "openingRecords",
+        expandedRowKeys: expandedCompletedRowKeys,
+        onExpandedRowsChange: (keys) => setExpandedCompletedRowKeys(keys.map(String)),
+        rowExpandable: (record) => !!record.children?.length || record.status === "closed",
+        expandedRowRender: (record) => record.children?.length
+          ? renderCompletedTable(record.children.map((child) => ({ ...child, key: child.id })))
+          : (
+            <ClosedOptionDetails
+              details={record.close_details}
+              openAmount={record.open_amount}
+              currency={selectedAccountCurrency || "USD"}
+            />
+          ),
+        expandIcon: ({ expanded, onExpand, record }) => record.children ? (
+          expanded ? (
+            <MinusOutlined
+              onClick={(event) => onExpand(record, event)}
+              style={{ cursor: "pointer", marginRight: 8 }}
+            />
+          ) : (
+            <PlusOutlined
+              onClick={(event) => onExpand(record, event)}
+              style={{ cursor: "pointer", marginRight: 8 }}
+            />
+          )
+        ) : (
+          <span style={{ marginRight: 8, width: 14, display: "inline-block" }} />
+        ),
+      }}
+    />
+  );
 
   const activeSummaryColumns: ColumnsType<ActiveUnderlyingSummary> = [
     {
@@ -1141,34 +1217,7 @@ export default function OptionsPage() {
 
       {selectedExpiredUnderlying ? (
         <Card title={`${selectedExpiredUnderlying} 已完成期权记录`}>
-          <Table
-            dataSource={selectedExpiredContracts}
-            columns={expiredColumns}
-            rowKey={getOptionContractRowKey}
-            size="small"
-            pagination={false}
-            expandable={{
-              childrenColumnName: "children",
-              expandIcon: ({ expanded, onExpand, record }) =>
-                record.children ? (
-                  expanded ? (
-                    <MinusOutlined
-                      onClick={(event) => onExpand(record, event)}
-                      style={{ cursor: "pointer", marginRight: 8 }}
-                    />
-                  ) : (
-                    <PlusOutlined
-                      onClick={(event) => onExpand(record, event)}
-                      style={{ cursor: "pointer", marginRight: 8 }}
-                    />
-                  )
-                ) : (
-                  <span
-                    style={{ marginRight: 8, width: 14, display: "inline-block" }}
-                  />
-                ),
-            }}
-          />
+          {renderCompletedTable(selectedExpiredContracts)}
         </Card>
       ) : null}
     </div>

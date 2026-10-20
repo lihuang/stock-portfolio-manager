@@ -1,6 +1,6 @@
 use super::csv::parse_expiry_to_sortable;
 use crate::db::Database;
-use crate::models::option::{OptionContract, OptionRecord};
+use crate::models::option::{OptionCloseDetails, OptionCloseRecord, OptionContract, OptionRecord};
 use crate::services::option_matching::{match_options_fifo, MatchRecord, SplitRecord};
 
 pub(super) fn load_matching_inputs(
@@ -213,6 +213,43 @@ pub fn get_option_contracts_inner(
                 })
                 .unwrap_or("active")
                 .to_string();
+            let close_details = (status == "closed").then(|| {
+                // The matcher already orders allocations chronologically and splits shared
+                // closing records across their opening batches using FIFO quantities.
+                let records: Vec<_> = result
+                    .allocations
+                    .iter()
+                    .filter(|allocation| allocation.open_id == open.id)
+                    .filter_map(|allocation| {
+                        let close = records_by_id.get(allocation.close_id.as_str())?;
+                        let share =
+                            allocation.quantity as f64 / close.quantity.unsigned_abs() as f64;
+                        Some(OptionCloseRecord {
+                            id: close.id.clone(),
+                            code: close.code.clone(),
+                            quantity: allocation.quantity,
+                            price: close.price,
+                            amount: close.amount.abs() * share,
+                            commission: close.commission.abs() * share,
+                            fee: close.fee.abs() * share,
+                            traded_at: close.traded_at.clone(),
+                        })
+                    })
+                    .collect();
+                let close_cost = records.iter().map(|record| record.amount).sum::<f64>();
+                let fees = open.commission.abs()
+                    + open.fee.abs()
+                    + records
+                        .iter()
+                        .map(|record| record.commission + record.fee)
+                        .sum::<f64>();
+                OptionCloseDetails {
+                    records,
+                    close_cost,
+                    fees,
+                    realized_pnl: open.amount - close_cost - fees,
+                }
+            });
             OptionContract {
                 id: open.id.clone(),
                 option_symbol: open.option_symbol.clone(),
@@ -228,6 +265,7 @@ pub fn get_option_contracts_inner(
                 traded_at: open.traded_at.clone(),
                 close_price: completing_close.map(|record| record.price),
                 close_code: completing_close.map(|record| record.code.clone()),
+                close_details,
                 status,
                 account_id: open.account_id.clone(),
             }
