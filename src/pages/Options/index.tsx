@@ -531,7 +531,7 @@ export default function OptionsPage() {
       title: "期权标识",
       dataIndex: "option_symbol",
       key: "option_symbol",
-      width: 225,
+      width: 230,
     },
     {
       title: "股票",
@@ -544,13 +544,13 @@ export default function OptionsPage() {
       title: "到期日",
       dataIndex: "expiry_date",
       key: "expiry_date",
-      width: 90,
+      width: 85,
     },
     {
       title: "行权价",
       dataIndex: "strike_price",
       key: "strike_price",
-      width: 85,
+      width: 80,
       render: (v: number) => formatMoney(v, "USD", 2, { useGrouping: false }),
     },
     {
@@ -605,7 +605,7 @@ export default function OptionsPage() {
       title: "交易时间",
       dataIndex: "traded_at",
       key: "traded_at",
-      width: 130,
+      width: 125,
       render: (v: string | null) => v ? v.substring(0, 10) : "-",
     },
   ];
