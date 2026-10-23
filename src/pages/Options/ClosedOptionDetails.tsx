@@ -59,11 +59,11 @@ export default function ClosedOptionDetails({ details, openAmount, currency }: C
       }))}
       dataSource={details.records}
       rowKey="id" size="small" pagination={false} />
-    <Space size={[24, 8]} wrap style={{ paddingInline: 8 }}>
-      <Typography.Text>开仓收入：{money(openAmount)}</Typography.Text>
-      <Typography.Text>平仓支出：{money(details.close_cost)}</Typography.Text>
-      <Typography.Text>总费用：{money(details.fees)}</Typography.Text>
-      <Typography.Text strong style={{ color: pnlColor(details.realized_pnl) }}>
+    <Space data-option-copy-row size={[24, 8]} wrap style={{ paddingInline: 8 }}>
+      <Typography.Text data-option-copy-cell>开仓收入：{money(openAmount)}</Typography.Text>
+      <Typography.Text data-option-copy-cell>平仓支出：{money(details.close_cost)}</Typography.Text>
+      <Typography.Text data-option-copy-cell>总费用：{money(details.fees)}</Typography.Text>
+      <Typography.Text data-option-copy-cell strong style={{ color: pnlColor(details.realized_pnl) }}>
         已实现净盈亏：{formatMoney(details.realized_pnl, currency, 2, { signDisplay: "always" })}
       </Typography.Text>
     </Space>

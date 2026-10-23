@@ -51,23 +51,38 @@ function runScenario(grouped = false) {
     const { default: OptionsPage } = await import("./src/pages/Options/index.tsx");
     const container = document.createElement("div"); document.body.append(container);
     const root = createRoot(container);
+    function copyNode(node) {
+      const selection = document.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      selection.removeAllRanges(); selection.addRange(range);
+      const data = new Map();
+      const event = new dom.Event("copy", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "clipboardData", { value: {
+        setData: (type, value) => data.set(type, value),
+      } });
+      // Native menus may dispatch outside the inner table's React event subtree.
+      document.dispatchEvent(event);
+      return { prevented: event.defaultPrevented, plain: data.get("text/plain"), html: data.get("text/html") };
+    }
     await act(async () => root.render(h(OptionsPage)));
     const tab = [...container.querySelectorAll('[role="tab"]')].find(node => node.textContent.includes("已到期"));
     await act(async () => tab.click());
     const buttons = () => [...container.querySelectorAll("button")].filter(node => node.textContent.includes("已平仓"));
     let target = buttons()[0];
     const before = { buttonCount: buttons().length, expanded: target?.getAttribute("aria-expanded") ?? null };
-    let after = null, collapsed = null, returned = null;
+    let after = null, collapsed = null, returned = null, openingCopy = null;
     if (target) {
       await act(async () => target.click());
       if (${JSON.stringify(grouped)}) {
+        openingCopy = copyNode(target.closest("tr").nextElementSibling);
         target = buttons().find(node => node.closest("table") !== target.closest("table"));
         if (target) await act(async () => target.click());
       }
       if (target) {
         const row = target.closest("tr");
         const detailRow = row.nextElementSibling;
-        after = { expanded: target.getAttribute("aria-expanded"), text: detailRow?.textContent ?? "", below: detailRow?.querySelector("table") != null };
+        after = { expanded: target.getAttribute("aria-expanded"), text: detailRow?.textContent ?? "", below: detailRow?.querySelector("table") != null, copy: copyNode(detailRow) };
         await act(async () => target.click());
         collapsed = { expanded: target.getAttribute("aria-expanded"), visible: detailRow?.style.display !== "none" };
         const summary = [...container.querySelectorAll(".ant-card")].find(node => node.querySelector(".ant-card-head-title")?.textContent === "个股期权汇总" && node.closest('[role="tabpanel"]')?.getAttribute("aria-hidden") !== "true");
@@ -78,7 +93,7 @@ function runScenario(grouped = false) {
         returned = buttons()[0]?.getAttribute("aria-expanded");
       }
     }
-    const result = { before, after, collapsed, returned };
+    const result = { before, after, collapsed, returned, openingCopy };
     await act(async () => root.unmount());
     await dom.happyDOM.close();
     process.stdout.write(JSON.stringify(result));
@@ -109,4 +124,21 @@ test("grouped completed contracts still allow each opening record to reveal its 
   assert.equal(result.after?.expanded, "true");
   assert.match(result.after.text, /\+\$6,090\.66/);
   assert.equal(result.collapsed.expanded, "false");
+});
+
+test("native document copy preserves expanded opening rows and closing details as Excel cells", () => {
+  const result = runScenario(true);
+  assert.equal(result.openingCopy.prevented, true);
+  const openingRows = result.openingCopy.plain.split("\r\n").map(row => row.split("\t"));
+  assert.equal(openingRows.length, 3);
+  assert.equal(openingRows[0][0], "期权标识");
+  assert.equal(openingRows[1][0], "BABA 15JAN27 160 C");
+  assert.equal(openingRows[2][0], "BABA 15JAN27 160 C");
+  assert.ok(openingRows.every(row => row.length === 11));
+  assert.equal(result.after.copy.prevented, true);
+  const closingRows = result.after.copy.plain.split("\r\n").map(row => row.split("\t"));
+  assert.deepEqual(closingRows[0], ["平仓时间", "合约数", "平仓价", "平仓支出", "平仓费用", "方式"]);
+  assert.equal(closingRows[1][0], "2024-12-04, 09:57:34");
+  assert.match(closingRows[2][3], /已实现净盈亏：\+\$6,090\.66/);
+  assert.equal((result.after.copy.html.match(/<table>/g) ?? []).length, 1);
 });

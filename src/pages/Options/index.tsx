@@ -53,6 +53,7 @@ import type { ActiveUnderlyingSummary } from "./activeOptionsViewModel";
 import { formatMoney } from "../../lib/formatMoney";
 import OptionsCsvImport from "./OptionsCsvImport";
 import ClosedOptionDetails from "./ClosedOptionDetails";
+import { copyOptionTableSelection } from "./copyOptionTableSelection";
 
 const { Title, Text } = Typography;
 
@@ -104,6 +105,17 @@ export default function OptionsPage() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [confirmName, setConfirmName] = useState("");
   const [expandedCompletedRowKeys, setExpandedCompletedRowKeys] = useState<string[]>([]);
+  const completedRecordsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleCopy = (event: ClipboardEvent) => {
+      if (completedRecordsRef.current) {
+        copyOptionTableSelection(event, completedRecordsRef.current);
+      }
+    };
+    document.addEventListener("copy", handleCopy);
+    return () => document.removeEventListener("copy", handleCopy);
+  }, []);
 
   useEffect(() => {
     setExpandedCompletedRowKeys([]);
@@ -1217,7 +1229,9 @@ export default function OptionsPage() {
 
       {selectedExpiredUnderlying ? (
         <Card title={`${selectedExpiredUnderlying} 已完成期权记录`}>
-          {renderCompletedTable(selectedExpiredContracts)}
+          <div ref={completedRecordsRef}>
+            {renderCompletedTable(selectedExpiredContracts)}
+          </div>
         </Card>
       ) : null}
     </div>
