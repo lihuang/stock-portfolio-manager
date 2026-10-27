@@ -1,11 +1,13 @@
+import { useState } from "react";
 import { Alert, Row, Col, Card, Spin, Empty, Select } from "antd";
 import PieChart from "../../components/charts/PieChart";
 import StatCard from "../../components/charts/StatCard";
 import HoldingsTable from "../Dashboard/HoldingsTable";
 import { statisticsViewKey, useStatisticsStore } from "../../stores/statisticsStore";
 import { useAccountStore } from "../../stores/accountStore";
-import type { AccountStatistics } from "../../types";
+import type { AccountStatistics, HoldingDetail } from "../../types";
 import { usePnlColor } from "../../hooks/usePnlColor";
+import AccountStockTransactionsModal from "./AccountStockTransactionsModal";
 import StatisticsAiReviewButton from "./StatisticsAiReviewButton";
 
 interface Props {
@@ -20,6 +22,7 @@ const marketCurrency: Record<string, { code: string; symbol: string }> = {
 };
 
 export default function AccountTab({ selectedAccountId, onAccountChange }: Props) {
+  const [transactionHolding, setTransactionHolding] = useState<HoldingDetail | null>(null);
   const { pnlColor } = usePnlColor();
   const { accountStats, loadingByView, errorByView } = useStatisticsStore();
   const { accounts } = useAccountStore();
@@ -116,9 +119,27 @@ export default function AccountTab({ selectedAccountId, onAccountChange }: Props
               loading={loading}
               hideAccountMarket
               formatCashSharesAsInteger
+              onShowTransactions={setTransactionHolding}
             />
           </Card>
         </>
+      )}
+
+      {transactionHolding && (
+        <AccountStockTransactionsModal
+          open
+          accountId={transactionHolding.account_id}
+          accountName={transactionHolding.account_name}
+          symbol={transactionHolding.symbol}
+          stockName={transactionHolding.name}
+          onClose={() => setTransactionHolding(null)}
+          onUpdated={() => {
+            return useStatisticsStore.getState().fetchView(
+              { kind: "account", accountId: transactionHolding.account_id },
+              "reload-after-in-flight",
+            );
+          }}
+        />
       )}
     </div>
   );

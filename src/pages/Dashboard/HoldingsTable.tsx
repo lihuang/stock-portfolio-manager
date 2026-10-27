@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Table, Tag, Typography } from "antd";
+import { Button, Table, Tag, Typography } from "antd";
 import type { ColumnsType, TableProps } from "antd/es/table";
 import type { HoldingDetail } from "../../types";
 import { usePnlColor } from "../../hooks/usePnlColor";
@@ -13,6 +13,7 @@ interface Props {
   loading: boolean;
   hideAccountMarket?: boolean;
   formatCashSharesAsInteger?: boolean;
+  onShowTransactions?: (holding: HoldingDetail) => void;
 }
 
 const marketLabel: Record<string, string> = {
@@ -21,7 +22,7 @@ const marketLabel: Record<string, string> = {
   HK: "🇭🇰 HK",
 };
 
-export default function HoldingsTable({ holdings, loading, hideAccountMarket = false, formatCashSharesAsInteger = false }: Props) {
+export default function HoldingsTable({ holdings, loading, hideAccountMarket = false, formatCashSharesAsInteger = false, onShowTransactions }: Props) {
   const { pnlColor } = usePnlColor();
   const { pageSize, onShowSizeChange } = useTablePageSize();
 
@@ -195,10 +196,23 @@ export default function HoldingsTable({ holdings, loading, hideAccountMarket = f
       width: 90,
     },
     ];
+    if (onShowTransactions) {
+      allColumns.push({
+        title: "交易",
+        key: "transactions",
+        width: 80,
+        align: "center",
+        render: (_, record) => (
+          <Button type="link" size="small" onClick={() => onShowTransactions(record)}>
+            明细
+          </Button>
+        ),
+      });
+    }
     return hideAccountMarket
       ? allColumns.filter((c) => c.key !== "account_name" && c.key !== "market")
       : allColumns;
-  }, [accountFilters, filteredTotalMvUsd, pnlColor, hideAccountMarket, formatCashSharesAsInteger]);
+  }, [accountFilters, filteredTotalMvUsd, pnlColor, hideAccountMarket, formatCashSharesAsInteger, onShowTransactions]);
 
   return (
     <Table<HoldingDetail>
@@ -206,7 +220,7 @@ export default function HoldingsTable({ holdings, loading, hideAccountMarket = f
       dataSource={holdings}
       rowKey="id"
       loading={loading}
-      scroll={{ x: hideAccountMarket ? 1100 : 1310 }}
+      scroll={{ x: (hideAccountMarket ? 1100 : 1310) + (onShowTransactions ? 80 : 0) }}
       size="small"
       pagination={{ pageSize, showSizeChanger: true, onShowSizeChange }}
       bordered
